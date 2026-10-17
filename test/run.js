@@ -326,6 +326,16 @@ const AEON = {
     ok(/<param name="kcmask" default="mask.png" \/>/.test(x), 'no default mask param');
     ok(/diffuse="special:\/\/skin\/extras\/kc\/\$PARAM\[kcmask\]">colors\/black.png/.test(x), 'dimmer not masked');
     ok(/<include content="Dimmer"><param name="kcmask">mask_wide.png<\/param>/.test(x), 'call has no wide mask');
+    ok(!/border="20"/.test(x), 'masked dimmer kept its border (Kodi slices the mask into a cross)');
+  });
+  await test('rounded art: bordered textures lose the border so the mask is not sliced into a cross', async () => {
+    const files = { 'xml/Wall.xml': `<includes><include name="W">
+      <control type="image"><width>268</width><height>390</height><texture border="8" background="true">$VAR[PosterThumb]</texture></control>
+      <control type="image"><width>268</width><height>390</height><texture border="6" infill="false" colordiffuse="FFFFFFFF">colors/white.png</texture></control>
+    </include></includes>` };
+    const x = skin.applyAll({ ...files }, { ...T0, posters: true }, { dirs: ['xml'], res: [1920, 1080] }).changed['xml/Wall.xml'];
+    ok(/<texture background="true" diffuse="special:\/\/skin\/extras\/kc\/mask.png">\$VAR\[PosterThumb\]/.test(x), 'poster not masked without border');
+    ok(/<texture border="6" infill="false" colordiffuse="FFFFFFFF">colors\/white.png/.test(x), 'focus frame was changed');
   });
   await test('artwork across the top: stops at the poster row and adds a fade + solid band', async () => {
     const files = { 'xml/Bg.xml': '<includes><include name="B"><control type="multiimage"><right>-120</right><width>1280</width><height>720</height><imagepath background="true" diffuse="views/myflix/fanart_diffuse.png">$INFO[ListItem.Art(fanart)]</imagepath><visible>Control.IsVisible(509)</visible></control></include></includes>',

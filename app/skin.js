@@ -169,6 +169,9 @@ function roundPosters(x) {
     if (w && h && w / h >= 0.85 && w / h <= 1.15 && !/poster/i.test(body)) return m; // square: add-on / menu icons
     isWide ? wide++ : n++;
     attrs = attrs.replace(/\s+diffuse\s*=\s*"[^"]*"/i, ''); // \s+ so colordiffuse="..." is left alone
+    // Kodi cuts a bordered texture into 9 slices and cuts the diffuse mask the same way, which draws a cross
+    // through the picture; on artwork the border only keeps edge pixels unstretched, so drop it
+    attrs = attrs.replace(/\s+border\s*=\s*"[^"]*"/i, '');
     return `<texture${attrs} diffuse="${isWide ? MASK_WIDE : MASK}">${body}</texture>`;
   }));
   return { xml: x, n: n + wide, wide };
@@ -185,6 +188,9 @@ function roundOverlays(x, sizes) {
   x = x.replace(/<control\s+type="image"[^>]*>[\s\S]*?<\/control>/gi, block => {
     const tex = /<texture\b([^>]*)>([^<]*)<\/texture>/i.exec(block);
     if (!tex || /\bdiffuse\s*=/i.test(' ' + tex[1].replace(/colordiffuse\s*=\s*"[^"]*"/gi, '')) || !OVERLAY_TEX.test(tex[2]) || ART_TEX.test(tex[2])) return block;
+    // a bordered texture slices its mask into a cross: frames (infill="false") stay unmasked, fills lose the border
+    if (/\sborder\s*=/i.test(tex[1]) && /infill\s*=\s*"false"/i.test(tex[1])) return block;
+    tex[1] = tex[1].replace(/\s+border\s*=\s*"[^"]*"/i, '');
     const w = +(/<width>\s*(\d+)\s*<\/width>/i.exec(block) || [])[1], h = +(/<height>\s*(\d+)\s*<\/height>/i.exec(block) || [])[1];
     if (w && h) {
       if (!sizeHit(w, h)) return block;
