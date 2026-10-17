@@ -970,7 +970,7 @@ $$('#osd .sw[data-o]').forEach(s => s.onclick = () => { T[s.dataset.o] = s.class
 // Zoom preset: which of the OSD's buttons it takes over (Info unless you pick another), and a thumbnail of the
 // chosen OSD (its own icons, in order) with that button highlighted
 var THUMB = null, thumbFor = '';
-const videoBtns = () => OB.filter(b => (b.section || 'Video') === 'Video' && !b.dup);
+const videoBtns = () => OB.filter(b => (b.section || 'Video') === 'Video');
 function zrVis() { $('zrWrap').style.display = T.osdZoom ? '' : 'none'; }
 async function osdThumbLoad() {
   const src = T.osdFrom || tid;

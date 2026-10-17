@@ -585,8 +585,13 @@ async function logs() {
     const ts = /(\d{4})(\d\d)(\d\d)_?(\d\d)(\d\d)(\d\d)/.exec(f);
     const sig = /signal (SIG\w+)|received signal (\w+)/i.exec(t);
     const frame = /#\d+\s+0x[0-9a-f]+ in (\S+)/i.exec(t) || /#\d+\s+(\S+ \(.*?\))/.exec(t);
-    const addon = /((?:plugin|script|service|inputstream|pvr)\.[\w.\-]+)/i.exec(t);
-    crashes.push({ file: f, when: ts ? `${ts[1]}-${ts[2]}-${ts[3]} ${ts[4]}:${ts[5]}` : '', signal: sig ? (sig[1] || sig[2]) : 'crash', frame: frame ? frame[1] : '', addon: addon ? addon[1] : '' });
+    // the culprit is whoever owns the crashing thread: gdb names it "Current thread is 1 (… (LWP n))" and the
+    // log section of the crash file shows which add-on logged from T:n (the first add-on named in the file is
+    // usually just the first one that started)
+    const lwp = (/Current thread is \d+ \(Thread 0x[0-9a-f]+ \(LWP (\d+)\)/i.exec(t) || [])[1];
+    const owner = lwp ? (await sh(`grep -E ' T:${lwp} ' ${q(f)} | grep -oE '(plugin|script|service|inputstream|pvr|skin)\\.[A-Za-z0-9_.-]+' | head -1`).catch(() => '')).trim().replace(/[.:]+$/, '') : '';
+    const addon = owner ? [, owner] : /((?:plugin|script|service|inputstream|pvr)\.[\w.\-]+)/i.exec(t);
+    crashes.push({ file: f, when: ts ? `${ts[1]}-${ts[2]}-${ts[3]} ${ts[4]}:${ts[5]}` : '', signal: sig ? (sig[1] || sig[2]) : 'crash', frame: frame ? frame[1] : '', addon: addon ? addon[1] + (owner ? ' (crashing thread)' : ' (guess)') : '' });
   }
   const a = parseLog(cur, 'kodi.log'), b = parseLog(old, 'kodi.old.log');
   if (old && !b.clean) crashes.push({ file: 'kodi.old.log', when: (LINE.exec(b.lastLine) || [])[1] || '', signal: 'unclean exit', frame: b.lastLine.slice(0, 160), addon: cause(b.lastLine, '') });
@@ -937,7 +942,7 @@ const handlers = {
   'skin:osdThumb': async ({ id }) => {
     if (osdThumbCache[id]) return osdThumbCache[id];
     const r = await readSkinXml(id);
-    const btns = skin.osdButtons(r.files, {}).filter(b => !b.dup && (b.section || 'Video') === 'Video');
+    const btns = skin.osdButtons(r.files, {}).filter(b => (b.section || 'Video') === 'Video');
     const want = [...new Set(btns.map(b => (b.tex || '').trim()).filter(t => /^[\w.\-\/ ]+\.(png|jpg)$/i.test(t)))].slice(0, 16);
     const media = r.s.path + '/media';
     const loose = new Set((await sh(`cd ${q(media)} 2>/dev/null && find . -type f ! -name '*.xbt' | sed 's|^\\./||'`)).split(/\r?\n/).map(x => x.trim().toLowerCase()).filter(Boolean));
