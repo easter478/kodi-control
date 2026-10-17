@@ -26,6 +26,7 @@ A Windows desktop app for managing a Kodi box (CoreELEC, LibreELEC, OSMC or any 
     - One switch for all of Kodi: it is patched into every skin in your profile at once (built-in skins get it when you switch to them from Kodi Control). It works from the seek bar and from the OSD's own skip buttons, which are turned into step seeks.
     - Switching it off takes it out of every skin and puts the seek delay, seek steps and frame cache back to Kodi's defaults. Its options show only while it is on.
     - Optional RAM-only frame cache: nothing written to the eMMC.
+    - Subtitles are hidden while the preview box is up and come back after the jump (option, on by default).
 - **Keymaps.** An editor for every Kodi window, with key capture from a live "last key" view. Works with the Keymap Editor add-on.
   - Import every current keymap (including the add-on's gen.xml) into your bindings.
   - "What each key does now": every binding Kodi loads, its defaults included, with the file it comes from and the ones a later file overrides. Sort it, filter it by device, and edit any binding with every action the Keymap Editor offers.
