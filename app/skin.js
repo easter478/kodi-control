@@ -1060,6 +1060,67 @@ function bgControls(b, cond, w, h) {
   return s;
 }
 
+// ---- seek preview (Netflix-style frame box while seeking) ----
+// The helper add-on's service writes the frame for Player.SeekTime to special://temp/kcseek and points
+// Window(Home).Property(kodicontrol.seekthumb) at it; kodicontrol.seekslot (0..SEEK_SLOTS) says how far along
+// the bar the target is, so the box can follow it. Plain textures (no border=, masked like the posters).
+const SEEK_SLOTS = 40;
+function seekPreviewBlock(t, W, H, font, bar) {
+  const w = { small: 288, medium: 384, large: 512 }[t.seekSize] || 384, h = Math.round(w * 9 / 16), pad = 6;
+  const bw = w + pad * 2, top = Math.max(0, H - (+t.seekBottom || 230) - h - pad * 2 - 44);
+  const P = 'Window(Home).Property(kodicontrol.seek';
+  const box = (left, vis) => `<control type="group"><!-- kodicontrol: seek preview -->
+    <left>${left}</left><top>${top}</top><width>${bw}</width><height>${h + pad * 2 + 44}</height>
+    <visible>!String.IsEmpty(${P}thumb))${vis ? ' + ' + vis : ''}</visible>
+    <control type="image"><left>0</left><top>0</top><width>${bw}</width><height>${h + pad * 2}</height><texture colordiffuse="${t.seekColor || 'FFFFFFFF'}" diffuse="${MASK_WIDE}">${WHITE}</texture></control>
+    <control type="image"><left>${pad}</left><top>${pad}</top><width>${w}</width><height>${h}</height><aspectratio>scale</aspectratio><texture diffuse="${MASK_WIDE}">$INFO[${P}thumb)]</texture></control>
+    <control type="label"><left>0</left><top>${h + pad * 2 + 4}</top><width>${bw}</width><height>40</height><align>center</align><aligny>center</aligny><font>${font}</font><textcolor>FFFFFFFF</textcolor><shadowcolor>FF000000</shadowcolor><label>$INFO[Player.SeekTime]$INFO[Player.Duration, / ]</label></control>
+  </control>`;
+  if (t.seekPlace === 'center') return box(Math.round((W - bw) / 2));
+  // follow the bar: one box per slot, each shown only for its stretch of the timeline
+  const x0 = bar ? bar.x0 : Math.round(W * 0.06), x1 = bar ? bar.x1 : Math.round(W * 0.94);
+  return Array.from({ length: SEEK_SLOTS + 1 }, (_, i) => {
+    const cx = x0 + (x1 - x0) * i / SEEK_SLOTS;
+    return box(Math.round(Math.max(0, Math.min(W - bw, cx - bw / 2))), `String.IsEqual(${P}slot),${i})`);
+  }).join('\n');
+}
+// Where the skin draws its seek bar: the first wide <control type="progress"> with a plain left / width,
+// in the window itself or in an include it uses (two levels deep). null = not found (box uses 6%..94%).
+function seekBarOf(out, d, k, W) {
+  const defs = {};
+  for (const f of Object.keys(out)) if (dirOf(f) === d && isXml(f)) for (const m of out[f].matchAll(/<include\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/include>/gi)) defs[m[1]] ||= m[2];
+  const look = (x, depth) => {
+    for (const m of x.matchAll(/<control\s+type="progress"[^>]*>([\s\S]*?)<\/control>/gi)) {
+      const l = /<left>\s*(\d+)\s*<\/left>/.exec(m[1]), w = /<width>\s*(\d+)\s*<\/width>/.exec(m[1]);
+      if (l && w && +w[1] >= W / 3) return { x0: +l[1], x1: +l[1] + +w[1] };
+    }
+    if (depth >= 2) return null;
+    for (const m of x.matchAll(/<include(?:\s+condition="[^"]*")?\s*>\s*([\w.\-]+)\s*<\/include>|<include\s+content="([^"]+)"/gi)) {
+      const r = defs[m[1] || m[2]] && look(defs[m[1] || m[2]], depth + 1);
+      if (r) return r;
+    }
+    return null;
+  };
+  return look(out[k] || '', 0);
+}
+function addSeekPreview(out, dirs, t, W, H, fontOf) {
+  const files = [];
+  for (const d of dirs) {
+    const sb = Object.keys(out).find(f => dirOf(f) === d && /^DialogSeekBar\.xml$/i.test(base(f)));
+    const bar = sb ? seekBarOf(out, d, sb, W) : null;
+    for (const name of ['DialogSeekBar.xml', 'VideoOSD.xml']) {
+      let k = Object.keys(out).find(f => dirOf(f) === d && base(f).toLowerCase() === name.toLowerCase());
+      if (!k && name === 'DialogSeekBar.xml') { k = `${d}/${name}`; out[k] = '<?xml version="1.0" encoding="UTF-8"?>\n<window>\n\t<controls>\n\t</controls>\n</window>\n'; }
+      if (!k || /kodicontrol: seek preview/.test(out[k])) continue;
+      const end = out[k].lastIndexOf('</controls>');
+      if (end < 0) continue;
+      out[k] = out[k].slice(0, end) + seekPreviewBlock(t, W, H, fontOf(d), bar || seekBarOf(out, d, k, W)) + '\n\t' + out[k].slice(end);
+      files.push(name);
+    }
+  }
+  return { n: files.length, files: [...new Set(files)] };
+}
+
 function injectBackground(x, block) {
   const c = /<controls\s*>/i.exec(x);
   if (!c) return null;
@@ -1185,6 +1246,10 @@ function applyAll(files, t, opts = {}) {
   } else if (t.osdZoom) {
     const r = addZoom(out, fontOf);
     add(r.n > 0 || r.note === 'already present', `OSD zoom button: ${r.note}`);
+  }
+  if (t.seekPreview) {
+    const r = addSeekPreview(out, dirs, t, W, H, fontOf);
+    add(r.n > 0, r.n ? `Seek preview: frame box added to ${r.files.join(', ')}` : 'Seek preview: no OSD or seek bar window found');
   }
   if (t.bgs && t.bgs.length) {
     for (const b of t.bgs) {

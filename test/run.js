@@ -390,6 +390,25 @@ const AEON = {
     ok(/id="600"><!-- kodicontrol: zoom --><onclick>RunScript\(script\.kodicontrol,zoom\)<\/onclick>/.test(v) && !/Previous/.test(v), 'direct button not replaced');
     ok(!/id="9871"/.test(v), 'a new button was added as well');
   });
+  await test('applyAll seekPreview adds the frame box to the seek bar and OSD', () => {
+    const files = { 'xml/VideoOSD.xml': Buffer.from('<window><controls><control type="button" id="600"/></controls></window>'), 'xml/Home.xml': Buffer.from('<window><controls/></window>') };
+    const f = skin.applyAll(files, { seekPreview: true }, { dirs: ['xml'], res: [1920, 1080] });
+    const osd = f.changed['xml/VideoOSD.xml'], bar = f.changed['xml/DialogSeekBar.xml'];
+    ok(osd && bar, 'seek bar window not created or OSD not patched');
+    eq((osd.match(/kodicontrol: seek preview/g) || []).length, 41);
+    ok(/kodicontrol\.seekslot\),40\)/.test(osd) && /\$INFO\[Window\(Home\)\.Property\(kodicontrol\.seekthumb\)\]/.test(osd), 'slot / thumb conditions missing');
+    ok(!/border=/.test(osd), 'masked textures must not have a border');
+    ok(osd.indexOf('seek preview') > osd.indexOf('id="600"'), 'box should sit on top of the OSD');
+    const c = skin.applyAll(files, { seekPreview: true, seekPlace: 'center' }, { dirs: ['xml'], res: [1920, 1080] });
+    eq((c.changed['xml/VideoOSD.xml'].match(/kodicontrol: seek preview/g) || []).length, 1);
+    const again = skin.applyAll({ ...files, ...f.changed }, { seekPreview: true }, { dirs: ['xml'], res: [1920, 1080] });
+    ok(!again.changed['xml/VideoOSD.xml'], 'applied twice');
+    // the box follows the skin's own bar, found through the seek bar window's include
+    const withBar = { ...files, 'xml/DialogSeekBar.xml': Buffer.from('<window><controls><control type="group"><include>PlayerBar</include></control></controls></window>'),
+      'xml/Includes.xml': Buffer.from('<includes><include name="PlayerBar"><control type="progress"><left>312</left><top>969</top><width>1296</width><height>2</height></control></include></includes>') };
+    const b = skin.applyAll(withBar, { seekPreview: true }, { dirs: ['xml'], res: [1920, 1080] }).changed['xml/DialogSeekBar.xml'];
+    ok(/<left>114<\/left>/.test(b) && /<left>1410<\/left>/.test(b), 'slots should span the skin bar 312..1608');
+  });
   await test('xbt: LZO1X frames decode (literal run + back reference)', async () => {
     const xbt = require('../app/xbt');
     // "abcabcabc": 3 literals, then a match of 6 at distance 3, then end of stream

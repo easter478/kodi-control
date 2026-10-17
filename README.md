@@ -8,6 +8,7 @@ A Windows desktop app for managing a Kodi box (CoreELEC, LibreELEC, OSMC or any 
   - Resolution, temperature, CPU, memory, IP address and Kodi version.
   - Live network speed, storage, load average, Kodi's own memory and CPU use, and library counts.
   - What's playing, with its poster, and the full player process info.
+  - eMMC read/write and NAS read/write for this session (shown only while connected; nothing runs on the box for it).
 - **Streaming from.** Shows which host Kodi is streaming from, labelled by debrid service (Real-Debrid, AllDebrid, Premiumize and others). Uses iftop for per-host speeds, or the whole-box rate without it.
 - **Skin tweaks.** Work with any skin, saved per skin:
   - Rounded posters and episode thumbnails.
@@ -20,10 +21,13 @@ A Windows desktop app for managing a Kodi box (CoreELEC, LibreELEC, OSMC or any 
   - Hide individual OSD buttons, which are shown by name.
   - Zoom preset: turn one of the OSD's own buttons (Info by default, you pick) into a 0 → 0.20 → 0.35 zoom cycle, or add a new button.
   - A preview of the chosen source OSD, with its own icons, and the zoom button highlighted.
+  - Editable zoom values.
+  - Seek preview (Netflix/Prime style): a frame box above the progress bar while seeking. Needs the FFmpeg Tools add-on; marked **heavy**, because ffmpeg runs on the box during playback.
 - **Keymaps.** An editor for every Kodi window, with key capture from a live "last key" view. Works with the Keymap Editor add-on.
   - Import every current keymap (including the add-on's gen.xml) into your bindings.
-  - "What each key does now": every binding Kodi loads, its defaults included, with the file it comes from and the ones a later file overrides.
+  - "What each key does now": every binding Kodi loads, its defaults included, with the file it comes from and the ones a later file overrides. Sort it, filter it by device, and edit any binding with every action the Keymap Editor offers.
 - **Live view.** A near-live screenshot of the TV, plus a remote control.
+  - Optional live video layer from the Amlogic video plane (about 15 fps), marked **heavy**.
   - Type text into Kodi. A text box pops up by itself whenever Kodi opens its keyboard.
   - Copy the screenshot to the clipboard, or save it.
 - **Media & IPTV.**
@@ -36,12 +40,16 @@ A Windows desktop app for managing a Kodi box (CoreELEC, LibreELEC, OSMC or any 
   - Thumbnails, keymaps, add-on settings, and Kodi settings and library.
   - Network shares and saved passwords, plus add-on logins and tokens.
   - CoreELEC settings, Wi-Fi networks and Bluetooth pairings.
-- **Ports.** Every port the box listens on, the program that owns it, and clashes with Kodi's and this app's ports (Connection page).
+- **Ports.** Every port the box listens on, the program that owns it, and warnings for clashes with Kodi's and this app's ports.
+- **Add-ons.** Every running add-on with its threads, CPU and memory, an on/off switch for each, and a dedicated switch for script.skin.info.service.
 - **Tools menu.**
   - Make local NFO files: next to the media on the box (Kodi's library export), or into a folder on this PC.
   - Screenshot tool (Ctrl+Shift+S) and Copy TV screenshot (Ctrl+Shift+C).
   - Type text into Kodi (Ctrl+T).
 - **84 app themes.**
+- **Default / Undo everywhere.** Every tab has a Default button: Skin tweaks, OSD themes, zoom values, seek preview, Live view, Keymaps, Keymap Editor settings, Media artwork, IPTV settings, Themes and the stats helper.
+  - Add-ons → **Changes Kodi Control made on the box** lists everything the app installed or changed on the box, each with Remove or Put back.
+  - Heavy features (seek preview, live video, "as fast as possible", key learning, FFmpeg Tools and System Tools installs) ask before they start.
 
 ## Install
 
@@ -100,7 +108,7 @@ npm test         # offline tests (needs Git Bash on Windows)
 
 ## Notes
 
-- Every change to the box goes over SSH, and every skin patch is undone by **Revert**.
+- Every change to the box goes over SSH and can be undone: skin patches by **Revert** or **Default**, everything else from its tab's Default button or the changes list on the Add-ons page.
 - The OSD transplant copies icons out of the source skin's `Textures.xbt`, unpacking them to PNG.
 
 ## License

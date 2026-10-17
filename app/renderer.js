@@ -22,7 +22,7 @@ async function act(btn, fn) {
   finally { if (btn) { btn.disabled = false; btn.innerHTML = label; } }
 }
 const needConn = () => { if (!S.connected) { toast('Not connected. Set up SSH first.', true); show('conn'); return false; } return true; };
-const report = (el, rows) => el.innerHTML = rows.map(r => `<div><span class="tag ${r.ok ? 'ok' : 'warn'}">${r.ok ? 'ok' : 'note'}</span><span>${esc(r.text)}</span></div>`).join('');
+const report = (el, rows) => el.innerHTML = rows.map(r => `<div><span class="tag ${r.ok ? 'ok' : r.bad ? 'err' : 'warn'}">${r.ok ? 'ok' : r.bad ? 'warning' : 'note'}</span><span>${esc(r.text)}</span></div>`).join('');
 
 const S = { cfg: null, connected: false, info: null, skins: [], current: '', menu: [] };
 
@@ -35,10 +35,12 @@ const pages = [['dashboard', 'Dashboard', '<rect x="3" y="3" width="7" height="9
   ['keymaps', 'Keymaps', '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>'],
   ['files', 'Pull files', '<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M12 10v6M9 13l3 3 3-3"/>'],
   ['media', 'Media & IPTV', '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>'],
+  ['addons', 'Add-ons', '<path d="M10 3h4v4a2 2 0 104 0V7h3v5h-2a2 2 0 100 4h2v5h-5v-2a2 2 0 10-4 0v2H5v-5h2a2 2 0 100-4H5V7h5z"/>'],
   ['logs', 'Crash logs', '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/>'],
   ['backup', 'Backup', '<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>'],
   ['themes', 'Themes', '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 000 18"/>'],
   ['exp', 'Experimental', '<path d="M9 3h6M10 3v6L4 20h16L14 9V3"/>'],
+  ['ports', 'Ports', '<path d="M5 12h14M12 5v14"/><circle cx="12" cy="12" r="9"/>'],
   ['conn', 'SSH', '<path d="M4 17l6-5-6-5M12 19h8"/>']];
 const nav = $('nav');
 pages.forEach(([id, n, ic]) => {
@@ -51,10 +53,14 @@ function show(id) {
   curPage = id;
   $$('nav button').forEach(x => x.classList.toggle('on', x.dataset.p === id));
   $$('.page').forEach(p => p.classList.toggle('on', p.id === id));
-  if (id === 'dashboard') poll();
+  if (id === 'dashboard') { poll(); ioShow(); }
   if (id === 'backup' && S.connected && !S.listed) { S.listed = true; loadBackups(); }
+  if (id === 'ports' && S.connected) $('ptScan').click();
+  if (id === 'addons' && S.connected) { adLoad(); unLoad(); }
+  if (id === 'preview') pvVidStart(); else if (PVV && PVV.on) pvVidStop();
   if (id === 'preview') { pvLoop(); if (S.connected) kbCheck(); }
   if (id === 'osd' && S.connected && !THUMB) osdThumbLoad();
+  if (id === 'osd' && S.connected) skCheck();
   if (id === 'keymaps' && S.connected && !KM.loaded) kmLoad();
   if (id === 'keymaps') kwStart(); else kwStop();
   if (id === 'files' && S.connected && !FP.dir) fpOpen(FP.home || '');
@@ -64,6 +70,7 @@ function show(id) {
 
 function setConn(on, text) {
   S.connected = on;
+  if (!on) $('ioCard').hidden = true; else if (curPage === 'dashboard') setTimeout(ioShow, 6000);
   $('connBox').innerHTML = `<span class="dot${on ? '' : ' off'}"></span> ${esc(text)}`;
 }
 
@@ -179,6 +186,24 @@ async function poll() {
   finally { polling = false; }
 }
 setInterval(poll, 3000);
+// eMMC / NAS traffic: the app samples the box every 5 s while connected; the card only exists while online
+async function ioShow() {
+  if (!S.connected) { $('ioCard').hidden = true; return; }
+  let d; try { d = await call('io:get'); } catch { return; }
+  $('ioCard').hidden = !d.online;
+  if (!d.ready) { $('ioNote').textContent = 'Measuring… the first numbers come in a few seconds.'; return; }
+  const rate = v => v > 0 ? `now ${fmtBytes(Math.round(v))}/s` : 'idle';
+  $('ioSince').textContent = 'since ' + new Date(d.since).toLocaleTimeString();
+  if (d.emmc) {
+    $('ioRd').textContent = fmtBytes(d.emmc.sessRd); $('ioRdN').textContent = `${rate(d.rate.rd)} · ${fmtBytes(d.emmc.bootRd)} since boot (${d.emmc.name})`;
+    $('ioWr').textContent = fmtBytes(d.emmc.sessWr); $('ioWrN').textContent = `${rate(d.rate.wr)} · ${fmtBytes(d.emmc.bootWr)} since boot`;
+  }
+  $('ioNr').textContent = fmtBytes(d.nas.rx); $('ioNrN').textContent = `${rate(d.rate.rx)} · ${d.open} open connection${d.open === 1 ? '' : 's'}`;
+  $('ioNw').textContent = fmtBytes(d.nas.tx); $('ioNwN').textContent = rate(d.rate.tx);
+  $('ioNote').textContent = (d.hosts.length ? `NAS: ${d.hosts.join(', ')} (from Kodi's sources). ` : "No SMB or NFS sources in Kodi, so there's no NAS to count. ") + "Counted only while Kodi Control is connected, from the box's own kernel counters. Nothing is installed or saved on the box." + (d.err ? ' Last read failed: ' + d.err : '');
+}
+setInterval(() => { if (curPage === 'dashboard') ioShow(); }, 5000);
+$('ioReset').onclick = async () => { await call('io:reset'); setTimeout(ioShow, 1500); };
 function renderPlaying(p, L) {
   if (!p) { $('dPlay').className = 'empty'; $('dPlay').textContent = 'Nothing playing'; return; }
   const it = p.item || {}, pr = p.prop || {};
@@ -242,7 +267,7 @@ async function pvShot() {
     const now = Date.now();
     pvTimes = pvTimes.filter(t => now - t < 5000); pvTimes.push(now);
     const fps = pvTimes.length > 1 ? (pvTimes.length - 1) / ((now - pvTimes[0]) / 1000) : 0;
-    $('pvNote').textContent = `Updated ${new Date().toLocaleTimeString()} · frame took ${now - t0} ms` + (fps ? ` · ${fps.toFixed(1)} fps` : '');
+    $('pvNote').textContent = `Menus updated ${new Date().toLocaleTimeString()} · frame took ${now - t0} ms` + (fps ? ` · ${fps.toFixed(1)} fps` : '') + (PVV.on && PVV.note ? ' · ' + PVV.note : '');
   } catch (e) { $('pvNote').textContent = 'Screenshot failed: ' + e.message; }
   finally { pvBusy = false; }
 }
@@ -253,10 +278,50 @@ function pvLoop() {
   if (!$('pvLive').classList.contains('on')) return;
   pvShot().finally(() => { if (curPage === 'preview') pvT = setTimeout(pvLoop, +$('pvRate').value || 0); });
 }
+// video layer: frames of the video plane stream in under the GUI screenshot (whose video area is transparent)
+var PVV = { on: false, img: null, note: '' };
+async function pvVidStart() {
+  if (!S.connected || !PVV.on || curPage !== 'preview') return;
+  const [w, fps] = $('pvVidQ').value.split(',').map(Number);
+  try { await call('preview:videoStart', { w, fps }); } catch (e) { PVV.on = false; $('pvVidOn').classList.remove('on'); toast(e.message, true); }
+}
+function pvVidStop() { call('preview:videoStop').catch(() => {}); }
+window.kc.on('preview:frame', f => {
+  const cv = $('pvVid');
+  if (f.stopped) { if (PVV.on && f.error) { toast(f.error, true); PVV.on = false; $('pvVidOn').classList.remove('on'); } cv.hidden = true; return; }
+  if (!PVV.on || curPage !== 'preview') return;
+  if (!f.data) { cv.hidden = true; PVV.note = 'Video layer: nothing playing'; return; }
+  const src = new Uint8Array(f.data.buffer || f.data, f.data.byteOffset || 0), n = f.w * f.h;
+  if (!PVV.img || PVV.img.width !== f.w || PVV.img.height !== f.h) PVV.img = new ImageData(f.w, f.h);
+  const d = PVV.img.data;
+  for (let i = 0, j = 0; i < n; i++, j += 3) { const k = i * 4; d[k] = src[j + 2]; d[k + 1] = src[j + 1]; d[k + 2] = src[j]; d[k + 3] = 255; }
+  // the frame is the whole picture squeezed to 16:9: letterbox it back to the film's shape, as the TV shows it
+  if (cv.width !== f.w || cv.height !== f.h) { cv.width = f.w; cv.height = f.h; }
+  const ctx = cv.getContext('2d');
+  if (!PVV.tmp || PVV.tmp.width !== f.w || PVV.tmp.height !== f.h) { PVV.tmp = document.createElement('canvas'); PVV.tmp.width = f.w; PVV.tmp.height = f.h; }
+  PVV.tmp.getContext('2d').putImageData(PVV.img, 0, 0);
+  const box = 16 / 9, dar = f.dar > 0.3 && f.dar < 5 ? f.dar : box;
+  let dw = f.w, dh = f.h;
+  if (dar > box) dh = Math.round(f.w / dar); else if (dar < box) dw = Math.round(f.h * dar);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, f.w, f.h);
+  ctx.drawImage(PVV.tmp, (f.w - dw) / 2, (f.h - dh) / 2, dw, dh);
+  cv.hidden = false;
+  PVV.note = `Video layer ${f.w}×${f.h} · ${f.fps.toFixed(1)} fps`;
+});
+// one picture of what the TV shows: the video frame with the GUI screenshot on top
+function pvComposite() {
+  const img = $('pvImg'), cv = $('pvVid');
+  if (cv.hidden || !PVV.on) return img.src;
+  const c = document.createElement('canvas'); c.width = img.naturalWidth || 1920; c.height = img.naturalHeight || 1080;
+  const x = c.getContext('2d'); x.drawImage(cv, 0, 0, c.width, c.height); x.globalCompositeOperation = 'lighten'; if (img.src) x.drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL('image/png');
+}
+$('pvVidOn').onclick = e => { PVV.on = e.currentTarget.classList.toggle('on'); if (PVV.on) { if (!needConn()) { PVV.on = false; e.currentTarget.classList.remove('on'); return; } pvVidStart(); } else { pvVidStop(); $('pvVid').hidden = true; } };
+$('pvVidQ').onchange = () => { if (PVV.on) pvVidStart(); };
 $('pvLive').onclick = e => { e.currentTarget.classList.toggle('on'); pvLoop(); };
 $('pvRate').onchange = () => { pvTimes = []; pvLoop(); };
 $('pvNow').onclick = e => needConn() && act(e.currentTarget, pvShot);
-$('pvSave').onclick = () => { if (!$('pvImg').src) return; const a = document.createElement('a'); a.href = $('pvImg').src; a.download = `kodi-${Date.now()}.png`; a.click(); };
+$('pvSave').onclick = () => { if (!$('pvImg').src) return; const a = document.createElement('a'); a.href = pvComposite(); a.download = `kodi-${Date.now()}.png`; a.click(); };
 async function pvKey(k) {
   if (!needConn()) return;
   try { await call('preview:key', k); if (!($('pvLive').classList.contains('on') && +$('pvRate').value === 0)) setTimeout(pvShot, 350); }
@@ -273,13 +338,13 @@ document.addEventListener('keydown', e => {
 // ---------- menu bar tools ----------
 const pop = (id, on) => { $(id).hidden = !on; if (on) setTimeout(() => ($(id).querySelector('button.p') || $(id).querySelector('button')).focus(), 30); };
 $$('[data-close]').forEach(b => b.onclick = () => pop(b.dataset.close, false));
-document.addEventListener('keydown', e => { if (e.key === 'Escape') ['nfoPop', 'shotPop'].forEach(id => { if (!$(id).hidden) pop(id, false); }); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') ['nfoPop', 'shotPop', 'kePop'].forEach(id => { if (!$(id).hidden) pop(id, false); }); });
 async function copyImage(src, btn) {
   if (!src) return toast('No screenshot yet.', true);
   try { await call('clip:image', src); toast('Screenshot copied. Paste it anywhere.'); } catch (e) { toast(e.message, true); }
 }
 const saveImage = src => { if (!src) return; const a = document.createElement('a'); a.href = src; a.download = `kodi-${Date.now()}.png`; a.click(); };
-$('pvCopy').onclick = () => copyImage($('pvImg').src);
+$('pvCopy').onclick = () => copyImage(pvComposite());
 async function shotTake() {
   if (!needConn()) return;
   $('shotNote').textContent = 'Taking a screenshot of the TV…';
@@ -304,16 +369,90 @@ window.kc.on('menu', async id => {
   if (id === 'shot') { pop('shotPop', true); return shotTake(); }
   if (id === 'shot:copy') { if (!needConn()) return; try { const src = await call('preview:shot'); await copyImage(src); } catch (e) { toast(e.message, true); } return; }
   if (id === 'type') { kbHidden = false; return kbShow({ title: 'Type into the field that has focus on the TV' }); }
-  if (id === 'ports') { show('conn'); $('ptScan').click(); }
+  if (id === 'ports') show('ports');
 });
 
 // ---------- ports on the box ----------
 $('ptScan').onclick = e => needConn() && act(e.currentTarget, async () => {
   const r = await call('ports:list');
-  report($('ptIssues'), r.issues.length ? r.issues.map(i => ({ ok: !i.bad, text: i.text })) : [{ ok: true, text: `No clashes. Kodi web server ${r.settings.web}, JSON-RPC 9090, EventServer ${r.settings.es} (UDP), helper add-on ${r.settings.helper}.` }]);
+  const bad = r.issues.filter(i => i.bad);
+  report($('ptIssues'), [...r.issues.map(i => ({ ok: false, bad: i.bad, text: i.text })), ...(bad.length ? [] : [{ ok: true, text: `No clashes. Kodi web server ${r.settings.web}, JSON-RPC 9090, EventServer ${r.settings.es} (UDP), helper add-on ${r.settings.helper}.` }])]);
+  $('ptWarn').hidden = !bad.length;
+  $('ptWarn').innerHTML = `<b>⚠ ${bad.length} port conflict${bad.length > 1 ? 's' : ''}</b><br>${bad.map(i => esc(i.text)).join('<br>')}`;
+  const nb = document.querySelector('nav button[data-p="ports"]'); nb.querySelector('.badge')?.remove();
+  if (bad.length) nb.insertAdjacentHTML('beforeend', `<span class="badge" title="Port conflicts">${bad.length}</span>`);
   $('ptTable').innerHTML = '<tr><th>Port</th><th>Proto</th><th>Listening on</th><th>Program</th><th>Service</th></tr>' + r.list.map(p =>
-    `<tr><td class="mono">${p.port}</td><td>${p.proto.toUpperCase()}</td><td class="mono">${esc(p.addr)}</td><td class="mono">${esc(p.prog || '?')}${p.pid ? ` <span class="note">pid ${esc(p.pid)}</span>` : ''}</td><td>${esc(p.service || '')}</td></tr>`).join('');
+    `<tr${p.warn ? ` class="warnrow" title="${esc(p.warn)}"` : ''}><td class="mono">${p.warn ? '⚠ ' : ''}${p.port}</td><td>${p.proto.toUpperCase()}</td><td class="mono">${esc(p.addr)}</td><td class="mono">${esc(p.prog || '?')}${p.pid ? ` <span class="note">pid ${esc(p.pid)}</span>` : ''}</td><td>${esc(p.service || '')}</td></tr>`).join('');
 });
+
+// ---------- add-ons ----------
+// sortable table headers: <th data-sort="key">; clicking the same one again flips the direction
+function sortHead(cols, st) {
+  return '<tr>' + cols.map(([k, n]) => k ? `<th data-sort="${k}" aria-sort="${st.key === k ? (st.dir > 0 ? 'ascending' : 'descending') : 'none'}">${n}${st.key === k ? (st.dir > 0 ? ' ▲' : ' ▼') : ''}</th>` : `<th>${n}</th>`).join('') + '</tr>';
+}
+function sortBind(table, st, render) {
+  $$(`#${table} th[data-sort]`).forEach(th => th.onclick = () => { st.dir = st.key === th.dataset.sort ? -st.dir : 1; st.key = th.dataset.sort; render(); });
+}
+const sortBy = (rows, st, val) => rows.sort((a, b) => { const x = val(a, st.key), y = val(b, st.key); return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y))) * st.dir; });
+const AD = { list: null, sort: { key: 'cpu', dir: -1 } };
+const adType = t => ({ 'xbmc.service': 'Service', 'xbmc.python.pluginsource': 'Plugin', 'xbmc.python.script': 'Script', 'xbmc.python.module': 'Module', 'xbmc.gui.skin': 'Skin', 'kodi.inputstream': 'InputStream', 'kodi.pvrclient': 'PVR client', 'xbmc.metadata.scraper.movies': 'Scraper', 'xbmc.metadata.scraper.tvshows': 'Scraper', 'kodi.resource.images': 'Resource', 'kodi.resource.language': 'Language', 'xbmc.addon.repository': 'Repository', 'kodi.peripheral': 'Peripheral', 'xbmc.ui.screensaver': 'Screensaver', 'xbmc.player.musicviz': 'Visualisation', 'xbmc.python.weather': 'Weather', 'kodi.game.controller': 'Controller', 'kodi.audioencoder': 'Audio encoder', 'kodi.audiodecoder': 'Audio decoder', 'kodi.imagedecoder': 'Image decoder', 'kodi.vfs': 'VFS', 'xbmc.webinterface': 'Web interface', 'kodi.context.item': 'Context menu', 'xbmc.metadata.scraper.albums': 'Scraper', 'xbmc.metadata.scraper.artists': 'Scraper', 'xbmc.metadata.scraper.library': 'Scraper', 'kodi.resource.uisounds': 'Resource' }[t] || t.replace(/^(xbmc|kodi)\./, ''));
+async function adLoad(btn) {
+  if (!needConn()) return;
+  await act(btn || $('adScan'), async () => {
+    AD.list = await call('addons:list');
+    const types = [...new Set(AD.list.list.map(a => adType(a.type)))].sort(), cur = $('adType').value;
+    $('adType').innerHTML = '<option value="">All types</option>' + types.map(t => `<option${t === cur ? ' selected' : ''}>${esc(t)}</option>`).join('');
+    adRender();
+  });
+}
+function adRender() {
+  if (!AD.list) return;
+  const L = AD.list.list, q = $('adFind').value.trim().toLowerCase(), mode = $('adShow').value, ty = $('adType').value;
+  const run = L.filter(a => a.running && a.enabled);
+  $('adRss').textContent = fmtBytes(AD.list.kodiRss);
+  $('adRun').innerHTML = `${run.length} <small>of ${L.length}</small>`;
+  $('adRunN').textContent = `${run.filter(a => a.threads).length} with live threads · ${AD.list.enabledServices} enabled services · ${L.filter(a => !a.enabled).length} disabled`;
+  const top = [...run].sort((a, b) => b.cpu - a.cpu)[0];
+  $('adTop').textContent = top && top.cpu > 0 ? top.name : 'Nothing busy';
+  $('adTopN').textContent = top && top.cpu > 0 ? `${top.cpu}% CPU over the last second` : 'Every add-on is idle';
+  const ss = L.find(a => a.id === 'script.skin.info.service');
+  $('adSkin').hidden = !ss;
+  if (ss) {
+    $('adSkinSw').classList.toggle('on', ss.enabled);
+    $('adSkinN').innerHTML = `${esc(ss.name)} ${esc(ss.version)} · ${ss.enabled ? (ss.running ? '<b>running</b>' : 'enabled') : '<b>disabled</b>'}${ss.neededBy.length ? ` · needed by <span class="mono">${esc(ss.neededBy.join(', '))}</span>: with it off, those skins lose the parts that call it (letter jump, some info-dialog extras) and log "Unable to find plugin"` : ''}. Version 2.0.1~beta11 crashed Kodi several times on this box (its "Online service" thread).`;
+  }
+  const rows = L.filter(a => (mode === 'all' || (mode === 'running' ? a.running && a.enabled : mode === 'enabled' ? a.enabled : !a.enabled)) && (!ty || adType(a.type) === ty) && (!q || (a.name + ' ' + a.id).toLowerCase().includes(q)));
+  sortBy(rows, AD.sort, (a, k) => k === 'mem' ? a.mem + a.proc : k === 'type' ? adType(a.type) : k === 'need' ? a.neededBy.length : k === 'status' ? (a.enabled ? a.running ? 2 : 1 : 0) : a[k]);
+  $('adCount').textContent = `${rows.length} add-ons shown`;
+  const status = a => !a.enabled ? '<span class="tag">disabled</span>' : a.broken ? '<span class="tag err">broken</span>' : a.running ? `<span class="tag ok" title="${esc(a.how.map(h => ({ thread: 'has live threads in Kodi', loaded: 'its files are loaded in Kodi', process: 'runs its own program', service: 'service: Kodi starts it at boot' })[h]).join(', '))}">running</span>` : '<span class="tag">enabled</span>';
+  $('adTable').innerHTML = sortHead([['name', 'Add-on'], ['type', 'Type'], ['status', 'Status'], ['threads', 'Threads'], ['cpu', 'CPU now'], ['cpuTime', 'CPU time'], ['mem', 'Memory'], ['need', 'Needed by'], ['', 'On']], AD.sort) + rows.map(a => `<tr>
+    <td><b>${esc(a.name)}</b> <span class="note">${esc(a.version)}</span><div class="note mono" style="margin:0">${esc(a.id)}${a.system ? ' · built in' : ''}</div></td>
+    <td>${esc(adType(a.type))}</td><td>${status(a)}</td>
+    <td class="mono"${a.threadNames ? ` title="${esc(a.threadNames)}"` : ''}>${a.threads || '–'}</td>
+    <td class="mono">${a.threads ? a.cpu + '%' : '–'}</td><td class="mono">${a.cpuTime ? fmtUp(a.cpuTime).replace(/^0m$/, a.cpuTime + 's') : '–'}</td>
+    <td class="mono">${a.proc ? fmtBytes(a.proc) + ' <span class="note">own program</span>' : a.mem ? fmtBytes(a.mem) + ' <span class="note">mapped</span>' : a.running ? '<span class="note">inside Kodi</span>' : '–'}</td>
+    <td class="note mono" style="margin:0">${esc(a.neededBy.slice(0, 3).join(', '))}${a.neededBy.length > 3 ? ` +${a.neededBy.length - 3}` : ''}</td>
+    <td>${a.type === 'xbmc.gui.skin' || a.id === 'script.kodicontrol' ? '' : `<div class="sw${a.enabled ? ' on' : ''}" data-aden="${esc(a.id)}" role="switch" aria-checked="${a.enabled}" aria-label="Enable ${esc(a.name)}"></div>`}</td></tr>`).join('');
+  sortBind('adTable', AD.sort, adRender);
+  $$('[data-aden]').forEach(s => s.onclick = () => adToggle(s.dataset.aden, !s.classList.contains('on'), s));
+}
+async function adToggle(id, on, sw) {
+  const a = AD.list?.list.find(x => x.id === id);
+  if (!on && a?.neededBy.length && !confirm(`${a.name} is needed by ${a.neededBy.join(', ')}. Those add-ons may lose features or stop working while it is off. Turn it off anyway?`)) return;
+  try {
+    sw?.classList.add('busy');
+    const now = await call('addons:enable', { id, enabled: on });
+    if (a) { a.enabled = now; if (!now) { a.running = false; a.threads = 0; a.cpu = 0; } }
+    toast(`${a ? a.name : id} ${now ? 'enabled' : 'disabled'}${now === on ? '' : ' (Kodi would not change it)'}`, now !== on);
+    adRender();
+    setTimeout(() => curPage === 'addons' && adLoad(), 2500);
+  } catch (e) { toast(e.message, true); }
+  finally { sw?.classList.remove('busy'); }
+}
+$('adScan').onclick = e => adLoad(e.currentTarget);
+$('adFind').oninput = adRender;
+['adShow', 'adType'].forEach(id => $(id).onchange = adRender);
+$('adSkinSw').onclick = e => adToggle('script.skin.info.service', !e.currentTarget.classList.contains('on'), e.currentTarget);
 
 // ---------- text into Kodi's keyboard ----------
 // Kodi sends Input.OnInputRequested when its keyboard opens (search, a text field, a password), and
@@ -346,7 +485,7 @@ $('kbText').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); $('k
 async function kbCheck() { try { const k = await call('kodi:keyboardOpen'); if (k.open && $('kbPop').hidden) kbShow(k); } catch {} }
 
 // ---------- keymaps ----------
-const KM = { list: [], loaded: false, meta: null, names: {} };
+const KM = { list: [], loaded: false, meta: null, names: {}, sort: { key: '', dir: 1 } };
 const KBD_KEYS = ['up', 'down', 'left', 'right', 'return', 'enter', 'escape', 'backspace', 'space', 'tab', 'home', 'end', 'pageup', 'pagedown', 'insert', 'delete', 'f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8', 'f9', 'f10', 'f11', 'f12', 'menu', 'browser_back', 'play_pause_media', 'stop', 'next_track', 'prev_track', 'volume_up', 'volume_down', 'volume_mute', 'launch_media_select', ...'abcdefghijklmnopqrstuvwxyz0123456789'];
 function kmLists() {
   const m = KM.meta;
@@ -360,9 +499,9 @@ const kmWinOpts = cur => { const ws = KM.meta?.windows || ['global']; const all 
 const kmLabel = key => /^\d+$/.test(key || '') ? (KM.names[key] || '') : '';
 function kmRender() {
   if (!KM.list.length) { $('kmTable').innerHTML = '<tr><td class="empty">No bindings yet. Add one, learn a key, or import from a file below.</td></tr>'; return; }
-  $('kmTable').innerHTML = '<tr><th>Window</th><th>Device</th><th>Key / button</th><th>Modifier</th><th>Long press</th><th>Action</th><th></th></tr>' + KM.list.map((b, i) => `<tr data-i="${i}">
+  $('kmTable').innerHTML = sortHead([['window', 'Window'], ['device', 'Device'], ['key', 'Key / button'], ['mod', 'Modifier'], ['longpress', 'Long press'], ['action', 'Action'], ['', '']], KM.sort) + KM.list.map((b, i) => `<tr data-i="${i}">
     <td><select data-f="window" aria-label="Window">${kmWinOpts(b.window || 'global')}</select></td>
-    <td><select data-f="device">${['keyboard', 'remote', 'gamepad'].map(d => `<option${d === b.device ? ' selected' : ''}>${d}</option>`).join('')}</select></td>
+    <td><select data-f="device">${DEVICES.map(d => `<option${d === b.device ? ' selected' : ''}>${d}</option>`).join('')}</select></td>
     <td><input list="kmKeys" data-f="key" value="${esc(b.key)}" placeholder="e.g. f1, red, 61513"${kmLabel(b.key) ? ` title="${esc(kmLabel(b.key))}"` : ''}>${kmLabel(b.key) ? `<div class="note" style="margin:2px 0 0">${esc(kmLabel(b.key))}</div>` : ''}</td>
     <td><select data-f="mod">${['', 'ctrl', 'shift', 'alt', 'ctrl,shift', 'ctrl,alt', 'super'].map(m => `<option value="${m}"${m === (b.mod || '') ? ' selected' : ''}>${m || '—'}</option>`).join('')}</select></td>
     <td><input type="checkbox" data-f="longpress"${b.longpress ? ' checked' : ''} aria-label="Long press"></td>
@@ -378,29 +517,100 @@ function kmRender() {
     el.onblur = () => { if (!el.value && el.dataset.was) el.value = el.dataset.was; };
   });
   $$('#kmTable [data-kdel]').forEach(el => el.onclick = () => { KM.list.splice(+el.dataset.kdel, 1); kmRender(); });
+  // sorting reorders the list itself, which is also the order written to kodicontrol.xml
+  sortBind('kmTable', KM.sort, () => { sortBy(KM.list, KM.sort, (b, k) => k === 'longpress' ? +!!b.longpress : String(b[k] || '').toLowerCase()); kmRender(); });
 }
 // What every key does now: system keymaps load first, then userdata/keymaps (gen.xml from the Keymap Editor
 // add-on, this app's kodicontrol.xml, any others), each folder in name order; a later file wins per
 // window + device + key. Overridden lines stay listed, struck through, so clashes are visible.
+const KA = { sort: { key: '', dir: 1 }, rows: [] };
+const DEVICES = ['keyboard', 'remote', 'gamepad', 'mouse', 'joystick', 'appcommand'];
 function kmAssign() {
   if (!KM.meta) return;
   const order = [...KM.meta.files.filter(f => f.system), ...KM.meta.files.filter(f => !f.system)];
-  const sysOn = $('kaSys').checked, q = $('kaFind').value.trim().toLowerCase(), win = $('kaWin').value;
+  const sysOn = $('kaSys').checked, q = $('kaFind').value.trim().toLowerCase(), win = $('kaWin').value, dev = $('kaDev').value;
   const rows = [], last = {};
   for (const f of order) for (const b of f.binds) {
-    const k = [b.window, b.device, String(b.key).toLowerCase(), b.mod || '', !!b.longpress].join('|');
+    const k = [String(b.window).toLowerCase(), b.device, String(b.key).toLowerCase(), b.mod || '', !!b.longpress].join('|');
     if (last[k]) last[k].over = f.name;
-    rows.push(last[k] = { ...b, file: f.name, sys: f.system });
+    rows.push(last[k] = { ...b, file: f.name, sys: f.system, n: rows.length });
   }
+  KA.rows = rows;
   const wins = [...new Set(rows.map(r => r.window))].sort();
   if ($('kaWin').options.length !== wins.length + 1) { $('kaWin').innerHTML = '<option value="">All windows</option>' + wins.map(w => `<option>${esc(w)}</option>`).join(''); $('kaWin').value = win; }
-  const show = rows.filter(r => (sysOn || !r.sys) && (!win || r.window === win) && (!q || [r.window, r.device, r.key, r.label, r.action, r.file].join(' ').toLowerCase().includes(q)));
+  const devs = [...new Set(rows.map(r => r.device))].sort();
+  if ($('kaDev').options.length !== devs.length + 1) { $('kaDev').innerHTML = '<option value="">All devices</option>' + devs.map(d => `<option>${esc(d)}</option>`).join(''); $('kaDev').value = dev; }
+  const show = rows.filter(r => (sysOn || !r.sys) && (!win || r.window === win) && (!dev || r.device === dev) && (!q || [r.window, r.device, r.key, r.label, r.action, r.file, kaActName(r.action)].join(' ').toLowerCase().includes(q)));
+  if (KA.sort.key) sortBy(show, KA.sort, (r, k) => k === 'key' ? String(r.label || r.key).toLowerCase() : k === 'from' ? r.n : String(r[k] || '').toLowerCase());
   const clash = rows.filter(r => r.over && !r.sys).length;
   $('kaCount').textContent = `${show.length} of ${rows.length} bindings · ${clash} of your bindings are overridden by a later file`;
-  $('kaTable').innerHTML = '<tr><th>Window</th><th>Device</th><th>Key / button</th><th>Action</th><th>From</th></tr>' + show.slice(0, 1500).map(r =>
-    `<tr${r.over ? ` style="opacity:.55" title="Overridden by ${esc(r.over)}"` : ''}><td class="mono">${esc(r.window)}</td><td>${esc(r.device)}</td><td class="mono">${r.over ? '<s>' : ''}${esc(r.label || r.key)}${r.label && r.label !== r.key ? ` <span class="note">${esc(r.key)}</span>` : ''}${r.mod ? ' +' + esc(r.mod) : ''}${r.longpress ? ' (long)' : ''}${r.over ? '</s>' : ''}</td><td class="mono">${esc(r.action)}</td><td>${esc(r.file)}${r.sys ? ' <span class="note">Kodi default</span>' : ''}${r.over ? ` <span class="note">→ ${esc(r.over)}</span>` : ''}</td></tr>`).join('');
+  $('kaTable').innerHTML = sortHead([['window', 'Window'], ['device', 'Device'], ['key', 'Key / button'], ['action', 'Action'], ['from', 'From'], ['', '']], KA.sort) + show.slice(0, 1500).map(r =>
+    `<tr${r.over ? ` style="opacity:.55" title="Overridden by ${esc(r.over)}"` : ''}><td class="mono">${esc(r.window)}</td><td>${esc(r.device)}</td><td class="mono">${r.over ? '<s>' : ''}${esc(r.label || r.key)}${r.label && r.label !== r.key ? ` <span class="note">${esc(r.key)}</span>` : ''}${r.mod ? ' +' + esc(r.mod) : ''}${r.longpress ? ' (long)' : ''}${r.over ? '</s>' : ''}</td><td class="mono">${esc(r.action)}${kaActName(r.action) ? ` <span class="note">${esc(kaActName(r.action))}</span>` : ''}</td><td>${esc(r.file)}${r.sys ? ' <span class="note">Kodi default</span>' : ''}${r.over ? ` <span class="note">→ ${esc(r.over)}</span>` : ''}</td><td>${r.over ? '' : `<button class="btn" data-kaed="${r.n}">Edit</button>`}</td></tr>`).join('');
+  sortBind('kaTable', KA.sort, kmAssign);
+  $$('[data-kaed]').forEach(b => b.onclick = () => keOpen(KA.rows[+b.dataset.kaed]));
 }
-['kaSys', 'kaWin'].forEach(id => $(id).onchange = kmAssign);
+// action id (any case) to the Keymap Editor's friendly name
+function kaActName(a) {
+  if (!KM.meta?.actionsFull || !a) return '';
+  if (!KM.actName) { KM.actName = {}; for (const [, l] of KM.meta.actionsFull) for (const [id, n] of l) if (n) KM.actName[id.toLowerCase()] = n; }
+  return KM.actName[String(a).trim().toLowerCase()] || '';
+}
+// ---------- edit one binding: every choice the Keymap Editor add-on offers ----------
+let KE = null;
+function keOpen(r) {
+  if (!KM.meta) return toast('Press Load from box first.', true);
+  KE = r || { window: 'global', device: 'keyboard', key: '', action: '' };
+  const wn = Object.fromEntries((KM.meta.windowNames || []).map(([id, n]) => [id.toLowerCase(), n]));
+  const wins = [...new Set([...(KM.meta.windows || []), KE.window])];
+  $('keWin').innerHTML = wins.map(w => `<option value="${esc(w)}"${w.toLowerCase() === String(KE.window).toLowerCase() ? ' selected' : ''}>${esc(wn[w.toLowerCase()] ? `${wn[w.toLowerCase()]} (${w})` : w)}</option>`).join('');
+  $('keDev').value = DEVICES.includes(KE.device) ? KE.device : 'keyboard';
+  $('keKey').value = KE.key || ''; $('keMod').value = KE.mod || ''; $('keLong').checked = !!KE.longpress;
+  const cats = KM.meta.actionsFull || [];
+  const cur = String(KE.action || '').toLowerCase();
+  const hit = cats.findIndex(([, l]) => l.some(([id]) => id.toLowerCase() === cur));
+  $('keCat').innerHTML = cats.map(([c, l], i) => `<option value="${i}"${i === Math.max(0, hit) ? ' selected' : ''}>${esc(c)} (${l.length})</option>`).join('');
+  keActs(cur);
+  $('keRaw').value = hit < 0 ? KE.action || '' : '';
+  $('keTitle').textContent = r ? 'Edit binding' : 'New binding';
+  $('keNow').innerHTML = r ? `Now: <span class="mono">${esc(r.window)} · ${esc(r.device)} · ${esc(r.label || r.key)}${r.mod ? ' +' + esc(r.mod) : ''}${r.longpress ? ' (long)' : ''}</span> → <b class="mono">${esc(r.action)}</b>` : '';
+  $('keSrc').textContent = (r ? `From ${r.file}${r.sys ? " (Kodi's defaults)" : ''}. ` : '') + (KM.meta.fromEditor ? '' : 'The Keymap Editor add-on is not installed on the box, so this shows a shorter action list.');
+  pop('kePop', true);
+}
+function keActs(sel) {
+  const l = (KM.meta.actionsFull || [])[+$('keCat').value]?.[1] || [];
+  $('keAct').innerHTML = l.map(([id, n]) => `<option value="${esc(id)}"${id.toLowerCase() === sel ? ' selected' : ''}>${esc(n ? `${n} — ${id}` : id)}</option>`).join('');
+}
+$('keCat').onchange = () => { keActs(''); $('keRaw').value = ''; };
+$('keAct').onchange = () => { $('keRaw').value = ''; };
+function keValue(action) {
+  const b = { window: $('keWin').value || 'global', device: $('keDev').value, key: $('keKey').value.trim(), mod: $('keMod').value, longpress: $('keLong').checked, action: action ?? ($('keRaw').value.trim() || $('keAct').value) };
+  if (!b.key) throw new Error('Pick the key or button');
+  if (!b.action) throw new Error('Pick an action');
+  return b;
+}
+function keStore(b) {
+  const id = x => [String(x.window).toLowerCase(), x.device, String(x.key).toLowerCase(), x.mod || '', !!x.longpress].join('|');
+  // editing one of your own bindings moves it; anything else is added (or replaces the same key)
+  if (KE && KE.file === 'kodicontrol.xml') { const i = KM.list.findIndex(x => id(x) === id(KE)); if (i >= 0) KM.list.splice(i, 1); }
+  const j = KM.list.findIndex(x => id(x) === id(b));
+  if (j >= 0) KM.list[j] = b; else KM.list.push(b);
+  kmRender();
+}
+async function keSave(apply, action) {
+  try {
+    const b = keValue(action);
+    keStore(b); pop('kePop', false);
+    if (!apply) return toast(`Added to your bindings: ${b.key} → ${b.action}. Press Save & reload to apply.`);
+    if (!needConn()) return;
+    const r = await call('keymap:save', KM.list);
+    KM.meta = await call('keymap:list'); KM.actName = null; kmFiles();
+    toast(`Saved ${r.count} bindings and reloaded keymaps: ${b.key} → ${b.action}`);
+  } catch (e) { toast(e.message, true); }
+}
+$('keApply').onclick = () => keSave(true);
+$('keKeep').onclick = () => keSave(false);
+$('keNoop').onclick = () => keSave(true, 'noop');
+['kaSys', 'kaWin', 'kaDev'].forEach(id => $(id).onchange = kmAssign);
 $('kaFind').oninput = kmAssign;
 function kmImport(files) {
   const seen = new Set(KM.list.map(x => [x.window, x.device, x.key, x.mod, !!x.longpress].join('|')));
@@ -436,7 +646,7 @@ function kmFiles() {
 async function kmLoad(btn) {
   if (!S.connected) return;
   await act(btn, async () => {
-    KM.meta = await call('keymap:list');
+    KM.meta = await call('keymap:list'); KM.actName = null;
     KM.meta.files.forEach(f => f.binds.forEach(b => { if (b.label) KM.names[b.key] = b.label; }));
     KM.list = (KM.meta.ours || []).map(x => ({ ...x }));
     KM.loaded = true;
@@ -487,7 +697,7 @@ $('kmSave').onclick = e => needConn() && act(e.currentTarget, async () => {
   if (bad.length) throw new Error(`${bad.length} binding(s) need both a key and an action.`);
   const r = await call('keymap:save', KM.list);
   toast(`Saved ${r.count} bindings and reloaded keymaps`);
-  KM.meta = await call('keymap:list'); kmFiles();
+  KM.meta = await call('keymap:list'); KM.actName = null; kmFiles();
 });
 
 // ---------- last key pressed (only while the Keymaps page is open) ----------
@@ -770,7 +980,7 @@ function loadSkinState() {
   $('osdsrc').innerHTML = '<option value="">This skin\'s own OSD</option>' + S.skins.filter(s => s.id !== tid).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
   $('osdsrc').value = T.osdFrom || '';
   $$('#osd .sw[data-o]').forEach(s => s.classList.toggle('on', !!T[s.dataset.o]));
-  $('ob').value = T.osdBarH || 0; obLabel(); OB = []; renderOsdBtns();
+  $('ob').value = T.osdBarH || 0; obLabel(); OB = []; renderOsdBtns(); skLoadT();
   $('osdReport').innerHTML = '';
   THUMB = null; thumbFor = ''; zrVis(); if (curPage === 'osd') osdThumbLoad();
 }
@@ -1016,9 +1226,58 @@ $('osdApply').onclick = e => needConn() && tid && act(e.currentTarget, async () 
   if (T.osdZoom && T.zoomReplace === undefined) { await osdThumbLoad(); if (T.zoomReplace === undefined) { $('zoomRep').focus(); throw new Error('Pick which OSD button should become the zoom preset first'); } }
   $('osdReport').innerHTML = '<div class="note">Patching skin files over SSH…</div>';
   report($('osdReport'), (await call('skin:apply', { id: tid, t: T })).report);
+  // the service follows the switch: on when the box is in the skin, off otherwise
+  try { await call('seek:save', skValues()); } catch {}
 });
+// ---------- seek preview ----------
+// look of the box is per skin (T), the frame step / seek delay / steps are Kodi-wide (seek:save)
+function skLoadT() {
+  $('skPlace').value = T.seekPlace || 'follow'; $('skSize').value = T.seekSize || 'medium';
+  $('skBot').value = T.seekBottom || 230; $('skColor').value = T.seekColor || 'FFFFFFFF'; skDemo();
+}
+function skDemo() {
+  $('skBotV').textContent = $('skBot').value + ' px';
+  const d = $('skDemo'); d.style.width = { small: '26%', medium: '34%', large: '44%' }[$('skSize').value];
+  d.style.left = $('skPlace').value === 'center' ? '50%' : '58%';
+  d.style.bottom = `calc(100% + ${Math.round((+$('skBot').value - 80) / 12)}px)`;
+  d.style.setProperty('--sk', $('skColor').value === '00FFFFFF' ? 'transparent' : '#' + $('skColor').value.slice(2));
+}
+[['skPlace', 'seekPlace'], ['skSize', 'seekSize'], ['skBot', 'seekBottom'], ['skColor', 'seekColor']].forEach(([id, k]) => $(id).oninput = $(id).onchange = () => { T[k] = id === 'skBot' ? +$(id).value : $(id).value; save(); skDemo(); });
+$('skDelay').oninput = () => { $('skDelayV').textContent = $('skDelay').value + ' ms'; };
+const skValues = () => ({ on: !!T.seekPreview, step: +$('skStep').value, width: { small: 288, medium: 384, large: 512 }[$('skSize').value] || 384, delay: +$('skDelay').value, steps: $('skSteps').value ? $('skSteps').value.split(',').map(Number) : null });
+async function skCheck(btn) {
+  if (!S.connected) return;
+  const go = async () => {
+    const s = await call('seek:status');
+    $('skFf').innerHTML = s.ffmpeg ? `<span class="tag ok">found</span> <span class="mono">${esc(s.ffmpeg)}</span>` : '<span class="tag warn">not installed</span>';
+    $('skInstall').style.display = s.ffmpeg ? 'none' : '';
+    if (s.conf.step) $('skStep').value = s.conf.step;
+    if (s.delay != null) { $('skDelay').value = s.delay; $('skDelayV').textContent = s.delay + ' ms'; }
+    if (Array.isArray(s.steps)) { const v = s.steps.join(','); if (![...$('skSteps').options].some(o => o.value === v)) $('skSteps').insertAdjacentHTML('afterbegin', `<option value="${v}">Now: ${esc(s.steps.join(', '))} s</option>`); $('skSteps').value = v; }
+    $('skNote').textContent = `Service ${s.conf.on ? 'on' : 'off'}${s.cached ? ` · ${fmtBytes(+s.cached * 1024)} of cached frames` : ''}`;
+  };
+  return btn ? act(btn, go) : go().catch(() => {});
+}
+$('skCheck').onclick = e => needConn() && skCheck(e.currentTarget);
+$('skInstall').onclick = e => needConn() && act(e.currentTarget, async () => toast(await call('seek:installFfmpeg')));
+$('skClear').onclick = e => needConn() && act(e.currentTarget, async () => { await call('seek:clearCache'); toast('Cached frames deleted'); skCheck(); });
+$('skSave').onclick = e => needConn() && act(e.currentTarget, async () => { toast(await call('seek:save', skValues())); skCheck(); });
 $('osdHelper').onclick = e => needConn() && act(e.currentTarget, async () => toast(await call('helper:install')));
-$$('[data-z]').forEach(b => b.onclick = () => needConn() && act(b, async () => { const z = await call('zoom:set', +b.dataset.z); toast(`Zoom set to ${z}`); }));
+// zoom values: shown as the amount added (0.20 = Kodi zoom 1.2), edited here and baked into the helper add-on
+let ZV = [0, 0.2, 0.35];
+const zName = v => v === 0 ? '0' : (+v).toFixed(2);
+function zRender() {
+  $('zEdit').innerHTML = ZV.map((v, i) => `<span class="row" style="gap:2px"><input type="number" min="0" max="1" step="0.05" value="${v}" data-zi="${i}" style="width:74px" aria-label="Zoom value ${i + 1}">${ZV.length > 1 ? `<button class="btn" data-zx="${i}" aria-label="Remove zoom value ${i + 1}">✕</button>` : ''}</span>`).join('');
+  $('zTry').innerHTML = ZV.map((v, i) => `<button class="btn" data-z="${i}">Zoom ${zName(v)}</button>`).join('');
+  $('zNote').innerHTML = `The zoom preset button cycles zoom <b>${ZV.map(zName).join(' → ')}</b> (Kodi zoom ${ZV.map(v => (1 + v).toFixed(2).replace(/0$/, '')).join(' / ')}), one press per step. It runs the small Kodi Control helper add-on, which is installed automatically.`;
+  $$('[data-zi]').forEach(el => el.onchange = () => { const v = Math.max(0, Math.min(1, parseFloat(el.value) || 0)); ZV[+el.dataset.zi] = Math.round(v * 1000) / 1000; zRender(); });
+  $$('[data-zx]').forEach(el => el.onclick = () => { ZV.splice(+el.dataset.zx, 1); zRender(); });
+  $$('[data-z]').forEach(b => b.onclick = () => needConn() && act(b, async () => { const z = await call('zoom:set', +b.dataset.z); toast(`Zoom set to ${zName(z - 1)} (Kodi zoom ${z})`); }));
+}
+$('zAdd').onclick = () => { if (ZV.length >= 8) return toast('Up to 8 zoom values.', true); ZV.push(Math.min(1, Math.round(((ZV[ZV.length - 1] || 0) + 0.1) * 100) / 100)); zRender(); };
+$('zReset').onclick = () => { ZV = [0, 0.2, 0.35]; zRender(); };
+$('zSave').onclick = e => act(e.currentTarget, async () => { const r = await call('zoom:save', ZV); ZV = await call('zoom:get'); zRender(); toast(r); });
+call('zoom:get').then(z => { ZV = z; zRender(); }).catch(() => zRender());
 $('osdTime').textContent = '';
 
 // ---------- logs ----------
@@ -1161,3 +1420,102 @@ $('cHelperTest').onclick = e => needConn() && act(e.currentTarget, async () => {
   if (c.host && (S.cfg.hasPassword || c.auth === 'key')) { show('dashboard'); connect(connForm(), true); }
   else show('conn');
 })();
+
+// ---------- Default / Undo on every tab, and warnings before the heavy features ----------
+// Heavy = makes the box work harder (CPU, eMMC writes, network) or installs something on it. Asked once per app run.
+const warned = {};
+function heavyOk(key, msg) { if (warned[key]) return true; if (!confirm(msg + '\n\nEverything can be undone later with the Default buttons, or under Add-ons → Changes Kodi Control made on the box.\n\nGo ahead?')) return false; return (warned[key] = true); }
+function guard(id, key, msg, when = () => true) { const el = $(id), orig = el.onclick; el.onclick = e => { if (when(e) && !heavyOk(key, msg)) return; orig.call(el, e); }; }
+guard('pvVidOn', 'video', 'The live video layer copies the TV picture from the box about 15 times a second. That uses box CPU and network while it is on.', () => !$('pvVidOn').classList.contains('on'));
+guard('skInstall', 'ffmpeg', 'This installs the FFmpeg Tools add-on (about 65 MB) on the box from the CoreELEC repository. Kodi asks you to confirm on the TV.');
+guard('ifInstall', 'iftop', 'This installs the System Tools add-on on the box from the CoreELEC repository. Kodi asks you to confirm on the TV.');
+guard('kmLearn', 'debuglog', 'Learning a key switches Kodi debug logging on for a few seconds, which writes extra to the eMMC.');
+{ const sp = document.querySelector('#osd .sw[data-o="seekPreview"]'), o = sp.onclick;
+  sp.onclick = e => { if (!sp.classList.contains('on') && !heavyOk('seek', 'Seek preview runs ffmpeg on the box in the background while you watch, to make the preview frames, and reads extra data from the NAS or stream. Expect more box CPU and network during playback.')) return; o.call(sp, e); }; }
+{ const r = $('pvRate'), o = r.onchange; let last = r.value;
+  r.onchange = e => { if (r.value === '0' && !heavyOk('fast', '"As fast as possible" asks Kodi for a screenshot again as soon as the last one arrives. That keeps the box busy.')) { r.value = last; return; } last = r.value; o.call(r, e); }; }
+
+// skin tweaks and OSD are built from the same skin files, so each Default resets its own part and re-applies the rest
+const OSD_ACTIVE = ['osdZoom', 'osdFrom', 'osdClear', 'osdBarH', 'osdHide', 'seekPreview'];
+const OSD_KEYS = [...OSD_ACTIVE, 'zoomReplace', 'seekPlace', 'seekSize', 'seekBottom', 'seekColor'];
+const tweakOn = k => { const v = T[k], d = DEF[k]; if (v === undefined) return false; if (d === undefined) return !!v && !(Array.isArray(v) && !v.length); return JSON.stringify(v) !== JSON.stringify(d); };
+async function resetPart(keys, rest, el) {
+  for (const k of keys) { if (k in DEF) T[k] = JSON.parse(JSON.stringify(DEF[k])); else delete T[k]; }
+  save(); loadSkinState();
+  const r = rest.some(tweakOn) ? await call('skin:apply', { id: tid, t: T }) : await call('skin:revert', tid);
+  report(el, r.report);
+}
+$('skinDefault').onclick = e => needConn() && tid && act(e.currentTarget, async () => {
+  if (!confirm('Turn every skin tweak off for this skin and put its original files back? OSD changes from the OSD themes page are kept.')) return;
+  const keys = [...new Set([...Object.keys(DEF), ...Object.keys(T)])].filter(k => !OSD_KEYS.includes(k));
+  $('skinReport').innerHTML = '<div class="note">Putting the skin back…</div>';
+  await resetPart(keys, OSD_ACTIVE, $('skinReport'));
+});
+$('osdDefault').onclick = e => needConn() && tid && act(e.currentTarget, async () => {
+  if (!confirm('Put this skin\'s stock OSD back: no zoom button, no borrowed OSD, normal bar and buttons, seek preview off? Skin tweaks from the Skin tweaks page are kept.')) return;
+  $('osdReport').innerHTML = '<div class="note">Putting the OSD back…</div>';
+  const rest = Object.keys(DEF).filter(k => !OSD_KEYS.includes(k));
+  await resetPart(OSD_KEYS, rest, $('osdReport'));
+  try { $('osdReport').insertAdjacentHTML('beforeend', `<div><span class="tag ok">ok</span><span>${esc(await call('seek:default'))}</span></div>`); } catch {}
+});
+$('zReset').onclick = e => act(e.currentTarget, async () => { ZV = [0, 0.2, 0.35]; zRender(); if (S.connected) { toast(await call('zoom:save', ZV)); ZV = await call('zoom:get'); zRender(); } });
+$('skDefault').onclick = e => needConn() && act(e.currentTarget, async () => {
+  if (!confirm('Turn the seek preview service off, delete its cached frames and put Kodi\'s seek delay and seek steps back to how they were?')) return;
+  toast(await call('seek:default')); skCheck();
+});
+$('skRemove').onclick = e => needConn() && act(e.currentTarget, async () => {
+  if (!confirm('Remove FFmpeg Tools from the box? The seek preview stops making frames until you install it again.')) return;
+  toast(await call('addons:remove', 'tools.ffmpeg-tools')); skCheck();
+});
+{ const o = skCheck; skCheck = async btn => { await o(btn); try { $('skRemove').style.display = /tools\.ffmpeg-tools/.test($('skFf').textContent) ? '' : 'none'; } catch {} }; }
+$('pvDefault').onclick = () => {
+  if (!$('pvLive').classList.contains('on')) $('pvLive').click();
+  if ($('pvVidOn').classList.contains('on')) $('pvVidOn').click();
+  $('pvVidQ').value = '640,15'; $('pvRate').value = '1500'; $('pvRate').onchange(); toast('Live view back to its defaults.');
+};
+$('kmDefault').onclick = e => needConn() && act(e.currentTarget, async () => {
+  if (!confirm('Delete Kodi Control\'s keymap file (kodicontrol.xml) from the box and reload keymaps? Every binding made here is removed; Kodi\'s own keymaps and the Keymap Editor\'s gen.xml stay.')) return;
+  toast(await call('keymap:default')); kmLoad();
+});
+$('kaDefault').onclick = e => needConn() && act(e.currentTarget, async () => {
+  $('kaLong').classList.remove('on'); $('kaMulti').classList.remove('on'); $('kaFile').value = 'gen';
+  const a = await call('kmaddon:set', { longpress: false, multifile: false, filename: 'gen' }); kaShow(a); toast('Keymap Editor settings back to defaults.');
+});
+$('usbUndo').onclick = e => needConn() && act(e.currentTarget, async () => {
+  if (!confirm('Put back the artwork each movie and show had before Kodi Control changed it, and delete the copied images from the box?')) return;
+  toast(await call('art:undo'));
+});
+$('m3uUndo').onclick = e => needConn() && act(e.currentTarget, async () => {
+  if (!confirm('Put IPTV Simple\'s settings back to how they were before Kodi Control first changed them, and reload channels?')) return;
+  toast(await call('iptv:undo')); m3uRefresh();
+});
+$('adUndo').onclick = e => needConn() && act(e.currentTarget, async () => {
+  if (!confirm('Switch every add-on you turned on or off here back the way it was?')) return;
+  toast(await call('addons:undo')); adLoad(); unLoad();
+});
+$('thDefault').onclick = () => { setTheme('midnight'); toast('Theme back to the default (Midnight).'); };
+$('cHelperRemove').onclick = e => needConn() && act(e.currentTarget, async () => {
+  if (!confirm('Remove the stats helper add-on from the box? The dashboard goes back to reading over SSH.')) return;
+  toast(await call('addons:remove', 'service.kodicontrol'));
+  if ($('cVia').value === 'helper') { $('cVia').value = ''; $('cVia').onchange(); }
+});
+// one list of everything the app changed on the box
+async function unLoad(btn) {
+  if (!S.connected) return;
+  const go = async () => {
+    const u = await call('undo:status'), rows = [];
+    for (const a of u.addons) rows.push([`${esc(a.name)} <span class="note mono">${esc(a.id)} ${esc(a.version || '')}</span>${a.heavy ? ` <span class="tag warn" title="${esc(a.heavy)}">heavy</span>` : ''}`, `Installed${a.enabled === false ? ', disabled' : ''} · ${esc(a.why)}`, `<button class="btn" data-unrm="${esc(a.id)}">Remove</button>`]);
+    if (u.seek.changed) rows.push(['Kodi seek delay and steps', `Now ${u.seek.delay} ms, ${(u.seek.steps || []).join(', ')} s · was ${u.seek.orig.delay} ms, ${u.seek.orig.steps.join(', ')} s`, '<button class="btn" data-un="seek:default">Put back</button>']);
+    if (u.seekCacheKb) rows.push(['Seek preview frame cache', fmtBytes(u.seekCacheKb * 1024) + ' in Kodi\'s temp folder', '<button class="btn" data-un="seek:clearCache">Delete</button>']);
+    if (u.keymapFile) rows.push(['Keymap file kodicontrol.xml', 'Bindings made in Keymaps', '<button class="btn" data-un="keymap:default">Delete</button>']);
+    if (u.addonToggles.length) rows.push(['Add-on switches', u.addonToggles.map(t => `${esc(t.id)} was ${t.was ? 'on' : 'off'}`).join(', '), '<button class="btn" data-un="addons:undo">Undo</button>']);
+    if (u.artChanges) rows.push(['Library artwork', `${u.artChanges} change${u.artChanges === 1 ? '' : 's'} from Media`, '<button class="btn" data-un="art:undo">Undo</button>']);
+    if (u.iptvOrig) rows.push(['IPTV Simple settings', 'Original saved before the first change', '<button class="btn" data-un="iptv:undo">Restore</button>']);
+    rows.push(['Skin and OSD files', 'Patched skins go back with Default on Skin tweaks and OSD themes, or Revert to original', '']);
+    $('unTable').innerHTML = rows.map(r => `<tr><td>${r[0]}</td><td class="note">${r[1]}</td><td style="text-align:right;white-space:nowrap">${r[2]}</td></tr>`).join('');
+    $$('[data-unrm]').forEach(b => b.onclick = ev => act(ev.currentTarget, async () => { if (!confirm(`Remove ${b.dataset.unrm} from the box?`)) return; toast(await call('addons:remove', b.dataset.unrm)); if (b.dataset.unrm === 'service.kodicontrol' && $('cVia').value === 'helper') { $('cVia').value = ''; $('cVia').onchange(); } unLoad(); }));
+    $$('[data-un]').forEach(b => b.onclick = ev => act(ev.currentTarget, async () => { if (!confirm('Put this back?')) return; const r = await call(b.dataset.un); toast(typeof r === 'string' ? r : 'Done'); unLoad(); }));
+  };
+  return btn ? act(btn, go) : go().catch(e => { $('unTable').innerHTML = `<tr><td class="empty">${esc(e.message)}</td></tr>`; });
+}
+$('unLoad').onclick = e => needConn() && unLoad(e.currentTarget);

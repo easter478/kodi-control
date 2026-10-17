@@ -62,6 +62,22 @@ function exec(cmd, { stdin, timeout = 30000, onData } = {}) {
   });
 }
 const sh = async (cmd, o) => (await exec(cmd, o)).out.toString();
+// A long-running command whose output streams in (live video frames). Returns { close } straight away.
+function stream(cmd, { stdin, onData, onClose } = {}) {
+  if (!ssh) throw new Error('Not connected');
+  let ch = null, closed = false;
+  ssh.exec(cmd, (e, st) => {
+    if (e) { closed = true; return onClose && onClose(e.message); }
+    ch = st;
+    const err = [];
+    st.on('data', d => onData && onData(d));
+    st.stderr.on('data', d => err.push(d));
+    st.on('close', () => { closed = true; onClose && onClose(Buffer.concat(err).toString().trim()); });
+    if (closed) { try { st.close(); } catch {} return; }
+    if (stdin != null) st.end(stdin); else st.end();
+  });
+  return { close: () => { closed = true; try { ch && ch.close(); } catch {} } };
+}
 
 async function probe() {
   KH = (await sh('for d in /storage/.kodi "$HOME/.kodi" /root/.kodi /home/*/.kodi; do [ -d "$d/userdata" ] && echo "$d" && break; done')).trim();
@@ -203,18 +219,22 @@ async function builtin(cmd) {
 
 // ---------- helper add-on ----------
 const HELPER_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<addon id="script.kodicontrol" name="Kodi Control helper" version="1.1.0" provider-name="Kodi Control">
+<addon id="script.kodicontrol" name="Kodi Control helper" version="1.2.0" provider-name="Kodi Control">
   <requires><import addon="xbmc.python" version="3.0.0"/></requires>
   <extension point="xbmc.python.script" library="default.py"/>
+  <extension point="xbmc.service" library="service.py" start="login"/>
   <extension point="xbmc.addon.metadata">
-    <summary lang="en_GB">Zoom presets and helpers used by Kodi Control</summary>
+    <summary lang="en_GB">Zoom presets, seek preview and helpers used by Kodi Control</summary>
     <platform>all</platform>
   </extension>
 </addon>
 `;
-const HELPER_PY = `import sys, json, xbmc, xbmcgui
-PRESETS = [1.0, 1.2, 1.35]
-NAMES = ['0', '0.20', '0.35']
+// zoom presets as the user sees them (0 = off, 0.20 = Kodi zoom 1.2); edited on the OSD page, baked into the helper
+const zoomList = () => { const z = (Array.isArray(cfg.zoom) ? cfg.zoom : [0, 0.2, 0.35]).map(Number).filter(v => isFinite(v) && v >= 0 && v <= 1); return z.length ? z : [0]; };
+const zoomName = v => v === 0 ? '0' : v.toFixed(2);
+const helperPy = () => `import sys, json, xbmc, xbmcgui
+PRESETS = [${zoomList().map(v => (1 + v).toFixed(3)).join(', ')}]
+NAMES = [${zoomList().map(v => `'${zoomName(v)}'`).join(', ')}]
 home = xbmcgui.Window(10000)
 
 def rpc(method, params):
@@ -229,7 +249,7 @@ def current():
     return min(range(len(PRESETS)), key=lambda i: abs(PRESETS[i] - z))
 
 def setzoom(i):
-    if i == 0:
+    if PRESETS[i] == 1.0:
         rpc("Player.SetViewMode", {"viewmode": "normal"})
     else:
         rpc("Player.SetViewMode", {"viewmode": {"zoom": PRESETS[i]}})
@@ -245,10 +265,166 @@ elif cmd.startswith('zoom='):
 elif cmd == 'builtin' and len(args) > 1:
     xbmc.executebuiltin(','.join(args[1:]))
 `;
+// Seek preview service: while Kodi is seeking (Player.Seeking, during the seek delay) it shows the frame at
+// Player.SeekTime. Frames come from ffmpeg (CoreELEC's "FFmpeg Tools" add-on) at fixed steps, cached in
+// special://temp/kcseek/<file hash>/, the asked-for one first, then the ones around where you're watching.
+const SEEK_PY = String.raw`import os, re, json, time, shutil, hashlib, threading, subprocess
+import xbmc, xbmcgui, xbmcvfs
+home = xbmcgui.Window(10000)
+CFG = xbmcvfs.translatePath('special://profile/addon_data/script.kodicontrol/seek.json')
+TMP = xbmcvfs.translatePath('special://temp/kcseek')
+SLOTS = 40
+def conf():
+    try:
+        with open(CFG) as f: return json.load(f)
+    except Exception: return {}
+def ffmpeg():
+    for p in (xbmcvfs.translatePath('special://home/addons/tools.ffmpeg-tools/bin/ffmpeg'), shutil.which('ffmpeg') or ''):
+        if p and os.path.exists(p): return p
+    return ''
+def secs(s):
+    try:
+        n = 0
+        for part in s.strip().split(':'): n = n * 60 + int(part)
+        return n
+    except Exception: return -1
+PROXY = {'port': 0, 'files': {}}
+def proxy():
+    # ffmpeg here can't open smb:// or nfs://, Kodi can: a tiny HTTP server on 127.0.0.1 serves the file
+    # through xbmcvfs with Range support, so ffmpeg seeks in it without any share password leaving Kodi
+    if PROXY['port']: return PROXY['port']
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a): pass
+        def do_GET(self):
+            path = PROXY['files'].get(self.path.strip('/'))
+            if not path: self.send_error(404); return
+            f = xbmcvfs.File(path)
+            try:
+                size = f.size()
+                m = re.match(r'bytes=(\d+)-(\d*)', self.headers.get('Range', ''))
+                a = int(m.group(1)) if m else 0
+                b = int(m.group(2)) if m and m.group(2) else size - 1
+                self.send_response(206 if m else 200)
+                self.send_header('Accept-Ranges', 'bytes'); self.send_header('Content-Length', str(b - a + 1))
+                if m: self.send_header('Content-Range', 'bytes %d-%d/%d' % (a, b, size))
+                self.end_headers()
+                f.seek(a, 0); left = b - a + 1
+                while left > 0:
+                    d = f.readBytes(min(262144, left))
+                    if not d: break
+                    self.wfile.write(d); left -= len(d)
+            except Exception: pass
+            finally: f.close()
+    srv = ThreadingHTTPServer(('127.0.0.1', 0), H); srv.daemon_threads = True
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    PROXY['port'] = srv.server_address[1]
+    return PROXY['port']
+def source(f):
+    # Kodi's "url|Header=value&..." form -> ffmpeg input + headers; local paths and http(s) go straight in,
+    # anything else Kodi can open (smb://, nfs://, ...) goes through the local proxy
+    url, _, hdr = f.partition('|')
+    if url.startswith('/') or re.match(r'https?://', url):
+        h = ''.join('%s: %s\r\n' % tuple(x.split('=', 1)) for x in hdr.split('&') if '=' in x)
+        return url, h
+    if re.match(r'(smb|nfs|ftp|sftp|dav|davs|upnp|special)://', url) and xbmcvfs.exists(url):
+        tok = hashlib.md5(url.encode('utf8', 'replace')).hexdigest()
+        PROXY['files'][tok] = url
+        return 'http://127.0.0.1:%d/%s' % (proxy(), tok), ''
+    return None, ''
+def clear():
+    home.clearProperty('kodicontrol.seekthumb'); home.clearProperty('kodicontrol.seekslot')
+
+class Frames(threading.Thread):
+    def __init__(self, url, hdr, key, step, width):
+        threading.Thread.__init__(self); self.daemon = True
+        self.url, self.hdr, self.step, self.width = url, hdr, step, width
+        self.dir = os.path.join(TMP, key); os.makedirs(self.dir, exist_ok=True)
+        self.want, self.around, self.dur, self.stop, self.bad = None, 0, 0, False, 0
+        self.remote = not url.startswith('/')
+        self.ev = threading.Event()
+    def path(self, b): return os.path.join(self.dir, '%06d.jpg' % b)
+    def make(self, b):
+        p = self.path(b)
+        if os.path.exists(p) or self.bad > 5: return
+        cmd = ['nice', '-n', '15', ffmpeg(), '-nostdin', '-loglevel', 'error']
+        if self.hdr: cmd += ['-headers', self.hdr]
+        cmd += ['-ss', str(b), '-noaccurate_seek', '-i', self.url, '-frames:v', '1', '-an', '-sn', '-threads', '1', '-vf', 'scale=%d:-2' % self.width, '-q:v', '5', '-y', p + '.tmp.jpg']
+        try:
+            subprocess.run(cmd, timeout=20, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if os.path.exists(p + '.tmp.jpg') and os.path.getsize(p + '.tmp.jpg') > 0: os.replace(p + '.tmp.jpg', p); self.bad = 0
+            else: self.bad += 1
+        except Exception: self.bad += 1
+    def run(self):
+        while not self.stop:
+            if self.want is not None:
+                b, self.want = self.want, None
+                self.make(b); continue
+            # prefetch outward from where you are: the whole file when local, 10 minutes each way when streamed
+            span = 600 if self.remote else max(self.dur, 600)
+            todo = None
+            for d in range(0, int(span) + self.step, self.step):
+                for b in (self.around + d, self.around - d):
+                    b = b // self.step * self.step
+                    if 0 <= b and (not self.dur or b < self.dur) and not os.path.exists(self.path(b)): todo = b; break
+                if todo is not None: break
+            if todo is None or self.bad > 5: self.ev.wait(2); self.ev.clear(); continue
+            self.make(todo)
+
+def tidy(keep):
+    try:
+        ds = sorted((os.path.join(TMP, d) for d in os.listdir(TMP)), key=os.path.getmtime, reverse=True)
+        for d in ds[3:]:
+            if os.path.basename(d) != keep: shutil.rmtree(d, True)
+    except Exception: pass
+
+mon, player = xbmc.Monitor(), xbmc.Player()
+gen, cur, last, cfgAt, c = None, None, 0, 0, {}
+while not mon.abortRequested():
+    now = time.time()
+    if now - cfgAt > 5: c, cfgAt = conf(), now
+    on = c.get('on') and player.isPlayingVideo()
+    if not on:
+        if gen: gen.stop = True; gen = None; cur = None; clear()
+        mon.waitForAbort(1); continue
+    try: f = player.getPlayingFile()
+    except Exception: f = ''
+    if f != cur:
+        cur = f
+        if gen: gen.stop = True; gen = None
+        clear()
+        url, hdr = source(f)
+        if url and ffmpeg():
+            key = hashlib.md5(f.encode('utf8', 'replace')).hexdigest()[:16]
+            gen = Frames(url, hdr, key, max(2, int(c.get('step', 10))), max(160, int(c.get('width', 384))))
+            try: gen.dur = int(player.getTotalTime()); gen.around = int(player.getTime())
+            except Exception: pass
+            tidy(key); gen.start()
+    if not gen: mon.waitForAbort(0.5); continue
+    try: gen.dur = int(player.getTotalTime()); gen.around = int(player.getTime())
+    except Exception: pass
+    if xbmc.getCondVisibility('Player.Seeking'):
+        t = secs(xbmc.getInfoLabel('Player.SeekTime'))
+        if t >= 0:
+            b = t // gen.step * gen.step
+            if not os.path.exists(gen.path(b)): gen.want = b; gen.ev.set()
+            # show the asked-for frame, or the nearest one made so far while it is being made
+            for d in range(0, 900, gen.step):
+                hit = [x for x in (b - d, b + d) if x >= 0 and os.path.exists(gen.path(x))]
+                if hit: home.setProperty('kodicontrol.seekthumb', gen.path(hit[0])); break
+            if gen.dur: home.setProperty('kodicontrol.seekslot', str(max(0, min(SLOTS, int(round(t * SLOTS / float(gen.dur)))))))
+            last = now
+    elif last and now - last > 0.4:
+        clear(); last = 0
+    mon.waitForAbort(0.1)
+clear()
+`;
 async function ensureHelper() {
   const dir = `${KH}/addons/script.kodicontrol`;
-  const fresh = (await sh(`[ -f ${q(dir + '/default.py')} ] && cmp -s ${q(dir + '/default.py')} - && echo same`, { stdin: HELPER_PY })).trim() !== 'same';
-  if (fresh) await exec(`mkdir -p ${q(dir)} && tar -C ${q(dir)} -xf -`, { stdin: buildTar({ 'addon.xml': HELPER_XML, 'default.py': HELPER_PY }) });
+  const files = { 'addon.xml': HELPER_XML, 'default.py': helperPy(), 'service.py': SEEK_PY };
+  const fresh = (await sh(`t=/tmp/kch.$; cat ${Object.keys(files).map(f => q(dir + '/' + f)).join(' ')} > $t 2>/dev/null; cmp -s $t - && echo same; rm -f $t`, { stdin: Object.values(files).join('') })).trim() !== 'same';
+  if (fresh) await exec(`mkdir -p ${q(dir)} && tar -C ${q(dir)} -xf -`, { stdin: buildTar(files) });
+  if (!(cfg.installed ||= []).includes('script.kodicontrol')) { cfg.installed.push('script.kodicontrol'); saveCfg(); }
   let enabled = false;
   try {
     const d = await rpc('Addons.GetAddonDetails', { addonid: 'script.kodicontrol', properties: ['enabled'] });
@@ -260,8 +436,281 @@ async function ensureHelper() {
       await new Promise(r => setTimeout(r, 2500));
     }
     try { await rpc('Addons.SetAddonEnabled', { addonid: 'script.kodicontrol', enabled: true }); enabled = true; } catch {}
+  } else if (fresh) {
+    // new files in an enabled add-on: re-read addon.xml and restart its service (off and on again)
+    if (HAS['kodi-send']) { await exec(`kodi-send -a 'UpdateLocalAddons'`); await new Promise(r => setTimeout(r, 2000)); }
+    try { await rpc('Addons.SetAddonEnabled', { addonid: 'script.kodicontrol', enabled: false }); await new Promise(r => setTimeout(r, 800)); await rpc('Addons.SetAddonEnabled', { addonid: 'script.kodicontrol', enabled: true }); } catch {}
   }
   return enabled ? 'Helper add-on ready' : 'Helper add-on copied, but Kodi has not picked it up yet: restart Kodi, then enable "Kodi Control helper" under My add-ons → Program add-ons';
+}
+
+// ---------- add-ons: what is running and what it costs ----------
+// Python and binary add-ons run inside kodi.bin as threads, so Linux can't give each one its own memory figure.
+// What it can give: CPU per thread (two samples 1 s apart), the threads each add-on owns (from the T:<thread>
+// ids in kodi.log, and thread names), the resident size of an add-on's own mapped files (binary .so, skin
+// Textures.xbt) from /proc/<kodi>/smaps, and real RSS for any add-on that runs as its own process.
+const ADDONS_PY = String.raw`import os, re, sys, time, json
+kh, ids = sys.argv[1], sys.argv[2].split(',')
+P = None
+for p in os.listdir('/proc'):
+    if p.isdigit():
+        try:
+            if open('/proc/%s/comm' % p).read().strip() in ('kodi.bin', 'kodi-gbm', 'kodi-x11', 'kodi-wayland', 'kodi'):
+                P = p; break
+        except Exception: pass
+out = {}
+res = {'pid': P, 'addons': out}
+def A(i): return out.setdefault(i, {'threads': [], 'cpu': 0.0, 'time': 0.0, 'mem': 0, 'proc': 0, 'how': []})
+def ticks(t):
+    try:
+        f = open('/proc/%s/task/%s/stat' % (P, t)).read().rsplit(')', 1)[1].split()
+        return int(f[11]) + int(f[12])
+    except Exception: return 0
+if P:
+    tasks = os.listdir('/proc/%s/task' % P)
+    t0 = dict((t, ticks(t)) for t in tasks); time.sleep(1); t1 = dict((t, ticks(t)) for t in tasks)
+    comm = {}
+    for t in tasks:
+        try: comm[t] = open('/proc/%s/task/%s/comm' % (P, t)).read().strip()
+        except Exception: comm[t] = ''
+    try: res['rss'] = int(re.search(r'VmRSS:\s+(\d+)', open('/proc/%s/status' % P).read()).group(1)) * 1024
+    except Exception: pass
+    ID = re.compile(r'(?<![\w.])((?:plugin|script|service|skin|weather|metadata|inputstream|pvr|context|resource|peripheral|audiodecoder|imagedecoder|screensaver|visualization|vfs|game|repository)\.[A-Za-z0-9_\-]+(?:\.[A-Za-z0-9_\-]+)*)')
+    live, owner = set(tasks), {}
+    try:
+        for l in open(kh + '/temp/kodi.log', errors='replace'):
+            m = re.search(r' T:(\d+) ', l)
+            if not m or m.group(1) == P or m.group(1) not in live or 'Found addon' in l: continue
+            for mm in ID.finditer(l[m.end():]):
+                a = mm.group(1)
+                if a in ids: owner.setdefault(m.group(1), []).append(a)
+    except Exception: pass
+    for t in tasks:
+        a = None
+        cand = owner.get(t, [])
+        best = [x for x in cand if not x.startswith(('script.module.', 'resource.', 'repository.'))]
+        if best: a = best[0]
+        elif cand: a = cand[0]
+        else:
+            c = comm.get(t, '')
+            if len(c) >= 6 and c != 'kodi.bin' and ID.match(c + ('x' if c.endswith('.') else '')):
+                hit = [i for i in ids if i.startswith(c) or (len(c) >= 15 and i[:15] == c)]
+                if hit: a = hit[0]
+        if a:
+            o = A(a); o['threads'].append(comm.get(t, '')); o['cpu'] += t1.get(t, 0) - t0.get(t, 0); o['time'] += t1.get(t, 0) / 100.0
+            if 'thread' not in o['how']: o['how'].append('thread')
+    cur = None
+    try:
+        for l in open('/proc/%s/smaps' % P):
+            if l[:1] in '0123456789abcdef' and '-' in l.split(' ', 1)[0]:
+                m = re.search(r'/addons/([^/]+)/', l); cur = m.group(1) if m else None
+            elif cur and l.startswith('Rss:'):
+                o = A(cur); o['mem'] += int(l.split()[1]) * 1024
+                if 'loaded' not in o['how']: o['how'].append('loaded')
+    except Exception: pass
+me = str(os.getpid())
+for p in os.listdir('/proc'):
+    if not p.isdigit() or p in (P, me): continue
+    try:
+        c = open('/proc/%s/cmdline' % p, 'rb').read().replace(b'\0', b' ').decode('utf8', 'replace')
+        m = re.search(r'/addons/([^/ ]+)/', c)
+        if not m: continue
+        o = A(m.group(1)); o['proc'] += int(re.search(r'VmRSS:\s+(\d+)', open('/proc/%s/status' % p).read()).group(1)) * 1024
+        if 'process' not in o['how']: o['how'].append('process')
+    except Exception: pass
+print(json.dumps(res))
+`;
+async function addonsList() {
+  const r = await rpc('Addons.GetAddons', { properties: ['name', 'version', 'enabled', 'broken', 'dependencies', 'path'] }, 20000);
+  const all = (r.addons || []).filter(a => a.type !== 'kodi.resource.language' || a.enabled);
+  const ids = all.map(a => a.addonid);
+  const run = JSON.parse((await sh(`python3 - ${q(KH)} ${q(ids.join(','))}`, { stdin: ADDONS_PY, timeout: 30000 })).trim() || '{}');
+  const need = {};
+  for (const a of all) for (const d of a.dependencies || []) if (!d.optional) (need[d.addonid] ||= []).push(a.addonid);
+  const enabledServices = all.filter(a => a.enabled && a.type === 'xbmc.service').map(a => a.addonid);
+  const list = all.map(a => {
+    const x = run.addons?.[a.addonid];
+    const running = !!x || (a.enabled && a.type === 'xbmc.service');
+    return { id: a.addonid, name: a.name, version: a.version, type: a.type, enabled: a.enabled, broken: a.broken || false, system: /^\/usr\//.test(a.path || ''),
+      running, service: a.type === 'xbmc.service', threads: x ? x.threads.length : 0, threadNames: x ? [...new Set(x.threads)].join(', ') : '',
+      cpu: x ? Math.round(x.cpu * 10) / 10 : 0, cpuTime: x ? Math.round(x.time) : 0, mem: x ? x.mem : 0, proc: x ? x.proc : 0, how: x ? x.how : (running ? ['service'] : []),
+      neededBy: (need[a.addonid] || []).filter(i => all.find(b => b.addonid === i && b.enabled)) };
+  });
+  return { list, kodiRss: run.rss || 0, enabledServices: enabledServices.length };
+}
+async function addonEnable({ id, enabled }) {
+  // first change through the app: remember how it was, so Add-ons → Undo can put it back
+  cfg.addonOrig ||= {};
+  if (!(id in cfg.addonOrig)) { const was = await rpc('Addons.GetAddonDetails', { addonid: id, properties: ['enabled'] }).then(r => r.addon.enabled).catch(() => null); if (was !== null && was !== !!enabled) cfg.addonOrig[id] = was; }
+  else if (cfg.addonOrig[id] === !!enabled) delete cfg.addonOrig[id];
+  saveCfg();
+  await rpc('Addons.SetAddonEnabled', { addonid: id, enabled: !!enabled }, 15000);
+  const d = await rpc('Addons.GetAddonDetails', { addonid: id, properties: ['enabled'] });
+  return d.addon.enabled;
+}
+
+// ---------- undo: everything Kodi Control changes on the box can be put back ----------
+// Add-ons the app installs (or can install). Removing one: disable it, delete its folder, its settings and the
+// downloaded zip, then let Kodi re-scan. Only these ids can be removed from the app.
+const APP_ADDONS = {
+  'script.kodicontrol': { name: 'Kodi Control helper', why: 'zoom preset button, seek preview service', heavy: 'Seek preview runs ffmpeg on the box while you watch' },
+  'service.kodicontrol': { name: 'Kodi Control stats helper', why: 'fast dashboard route (HTTP on your network)', heavy: '' },
+  'tools.ffmpeg-tools': { name: 'FFmpeg Tools (CoreELEC repository)', why: 'makes the seek preview frames', heavy: '65 MB on the eMMC; decodes video frames in the background during playback' },
+  'virtual.system-tools': { name: 'System Tools (CoreELEC repository)', why: 'iftop for "Streaming from"', heavy: '' },
+};
+const SEEK_DEFAULT = { delay: 750, steps: [-10, 10] };
+async function undoStatus() {
+  const ids = Object.keys(APP_ADDONS);
+  const there = (await sh(`for a in ${ids.join(' ')}; do [ -d ${q(KH + '/addons')}/$a ] && echo $a; done; true`)).split('\n').filter(Boolean);
+  const det = {};
+  for (const id of there) det[id] = await rpc('Addons.GetAddonDetails', { addonid: id, properties: ['enabled', 'version'] }).then(r => r.addon).catch(() => ({}));
+  const [delay, steps] = await Promise.all(['videoplayer.seekdelay', 'videoplayer.seeksteps'].map(s => rpc('Settings.GetSettingValue', { setting: s }).then(r => r.value).catch(() => null)));
+  const orig = cfg.seekOrig || SEEK_DEFAULT;
+  const files = (await sh(`[ -f ${q(KH + '/userdata/keymaps/kodicontrol.xml')} ] && echo km; ls ${q(KH + '/userdata/addon_data/pvr.iptvsimple')}/*.kcorig 2>/dev/null | head -1 | sed 's/^/iptv /'; du -sk ${q(KH + '/temp/kcseek')} 2>/dev/null | cut -f1 | sed 's/^/cache /'; true`)).split('\n');
+  return {
+    addons: there.map(id => ({ id, ...APP_ADDONS[id], enabled: det[id].enabled, version: det[id].version, byApp: (cfg.installed || []).includes(id) })),
+    seek: { delay, steps, orig, changed: delay != null && (delay !== orig.delay || JSON.stringify(steps) !== JSON.stringify(orig.steps)) },
+    keymapFile: files.includes('km'), iptvOrig: files.some(l => l.startsWith('iptv ')), seekCacheKb: +((files.find(l => l.startsWith('cache ')) || '').slice(6)) || 0,
+    addonToggles: Object.entries(cfg.addonOrig || {}).map(([id, was]) => ({ id, was })), artChanges: (cfg.artUndo || []).length,
+  };
+}
+async function removeAddon(id) {
+  if (!APP_ADDONS[id]) throw new Error('Kodi Control only removes the add-ons it installs');
+  await rpc('Addons.SetAddonEnabled', { addonid: id, enabled: false }).catch(() => {});
+  await new Promise(r => setTimeout(r, 800));
+  const extra = id === 'script.kodicontrol' ? ` ${q(KH + '/temp/kcseek')}` : '';
+  await exec(`rm -rf ${q(KH + '/addons/' + id)} ${q(KH + '/userdata/addon_data/' + id)}${extra}; rm -f ${q(KH + '/addons/packages')}/${id}-*.zip; true`);
+  await builtin('UpdateLocalAddons').catch(() => {});
+  cfg.installed = (cfg.installed || []).filter(x => x !== id);
+  if (id === 'service.kodicontrol') { if (cfg.conn.via === 'helper') cfg.conn.via = ''; delete cfg.conn.helperToken; rpcMode = null; }
+  saveCfg();
+  return `${APP_ADDONS[id].name} removed from the box`;
+}
+async function seekDefault() {
+  const o = cfg.seekOrig || SEEK_DEFAULT;
+  await exec(`f=${q(KH + '/userdata/addon_data/script.kodicontrol/seek.json')}; [ -d "$(dirname "$f")" ] && printf '%s' '{"on": false}' > "$f"; rm -rf ${q(KH + '/temp/kcseek')}; true`);
+  await rpc('Settings.SetSettingValue', { setting: 'videoplayer.seekdelay', value: o.delay });
+  await rpc('Settings.SetSettingValue', { setting: 'videoplayer.seeksteps', value: o.steps });
+  if (cfg.seek) cfg.seek.on = false; saveCfg();
+  return `Seek preview service off, cached frames deleted, seek delay ${o.delay} ms and steps ${o.steps.join(', ')} s put back`;
+}
+async function keymapDefault() {
+  await exec(`rm -f ${q(KH + '/userdata/keymaps/kodicontrol.xml')}`);
+  cfg.keymaps = []; saveCfg();
+  await builtin('Action(reloadkeymaps)').catch(() => {});
+  return 'kodicontrol.xml removed and keymaps reloaded: Kodi uses its own keymaps (and the Keymap Editor add-on\'s gen.xml, if you made one) again';
+}
+async function addonsUndo() {
+  const done = [];
+  for (const [id, was] of Object.entries(cfg.addonOrig || {})) {
+    try { await rpc('Addons.SetAddonEnabled', { addonid: id, enabled: was }, 15000); done.push(`${id} ${was ? 'enabled' : 'disabled'}`); delete cfg.addonOrig[id]; } catch (e) { done.push(`${id}: ${e.message}`); }
+  }
+  saveCfg();
+  return done.length ? 'Put back: ' + done.join(', ') : 'No add-on switches to undo';
+}
+async function artUndo() {
+  const list = cfg.artUndo || [];
+  let n = 0;
+  for (const u of list) {
+    const art = { [u.type]: u.old || null };
+    try { if (u.kind === 'movie') await rpc('VideoLibrary.SetMovieDetails', { movieid: u.id, art }); else await rpc('VideoLibrary.SetTVShowDetails', { tvshowid: u.id, art }); n++; } catch {}
+  }
+  await exec(`rm -rf ${q(KH + '/userdata/kodicontrol-art')}`);
+  cfg.artUndo = []; saveCfg();
+  return `${n} artwork change${n === 1 ? '' : 's'} put back`;
+}
+async function iptvUndo() {
+  const f = (await sh(`ls ${q(KH + '/userdata/addon_data/pvr.iptvsimple')}/*.kcorig 2>/dev/null | head -1`)).trim();
+  if (!f) throw new Error('No saved original IPTV Simple settings');
+  await exec(`mv -f ${q(f)} ${q(f.replace(/\.kcorig$/, ''))}`);
+  try { await rpc('Addons.SetAddonEnabled', { addonid: 'pvr.iptvsimple', enabled: false }); await new Promise(r => setTimeout(r, 1500)); await rpc('Addons.SetAddonEnabled', { addonid: 'pvr.iptvsimple', enabled: true }); } catch {}
+  return 'IPTV Simple settings put back to how they were before Kodi Control first changed them, and channels reloaded';
+}
+
+// ---------- eMMC and NAS traffic for this session ----------
+// Read-only, nothing is written on the box: every 5 s while connected, a Python snippet sent over SSH stdin reads
+// /proc/diskstats (the eMMC) and asks the kernel (netlink sock_diag, tcp_info) how many bytes each TCP connection
+// to the NAS has moved. The app keeps the totals; "session" starts when Kodi Control connects.
+const NETIO_PY = String.raw`import os, sys, json, socket, struct
+hosts = [h for h in sys.argv[1].split(',') if h]
+ips = set()
+for h in hosts:
+    try: ips.update(i[4][0] for i in socket.getaddrinfo(h, None))
+    except Exception: pass
+out = {'disks': [], 'socks': [], 'ips': sorted(ips)}
+for l in open('/proc/diskstats'):
+    f = l.split()
+    if len(f) > 9 and (f[2].startswith('mmcblk') and 'p' not in f[2][6:] and 'boot' not in f[2] and 'rpmb' not in f[2] or (f[2].startswith('sd') and len(f[2]) == 3)):
+        out['disks'].append({'name': f[2], 'rd': int(f[5]) * 512, 'wr': int(f[9]) * 512})
+def diag(fam):
+    s = socket.socket(socket.AF_NETLINK, socket.SOCK_DGRAM, 4)
+    req = struct.pack('=BBBBI', fam, socket.IPPROTO_TCP, 1 << 1, 0, 0xfff) + b'\0' * 48
+    s.sendto(struct.pack('=IHHII', 16 + len(req), 20, 0x301, 1, 0) + req, (0, 0))
+    done = False
+    while not done:
+        d = s.recv(65536); o = 0
+        while o + 16 <= len(d):
+            ln, typ = struct.unpack_from('=IH', d, o)
+            if ln < 16: done = True; break
+            if typ in (2, 3): done = True; break
+            m = d[o + 16:o + ln]
+            dport = struct.unpack_from('>H', m, 6)[0]
+            dst = socket.inet_ntop(fam, m[24:24 + (4 if fam == socket.AF_INET else 16)])
+            if dst.startswith('::ffff:'): dst = dst[7:]
+            cookie = '%x%x' % struct.unpack_from('=II', m, 44)
+            a = 72; rx = tx = 0
+            while a + 4 <= len(m):
+                al, at = struct.unpack_from('=HH', m, a)
+                if al < 4: break
+                if at == 2 and al - 4 >= 136:
+                    tx, rx = struct.unpack_from('=QQ', m, a + 4 + 120)
+                a += (al + 3) & ~3
+            if dst in ips: out['socks'].append({'c': cookie, 'd': dst, 'p': dport, 'rx': rx, 'tx': tx})
+            o += (ln + 3) & ~3
+    s.close()
+for fam in (socket.AF_INET, socket.AF_INET6):
+    try: diag(fam)
+    except Exception as e: out.setdefault('err', str(e))
+print(json.dumps(out))
+`;
+let IO = null;
+async function nasHosts() {
+  // only host names leave the box: any user:password@ in a source is cut off there, before it is sent
+  const raw = await sh(`cat ${q(KH + '/userdata/sources.xml')} 2>/dev/null | grep -oE '(smb|nfs)://[^/<"]+' | sed -E 's#^[a-z]+://([^@/]*@)?##' | sort -u`);
+  return raw.split('\n').map(x => x.trim()).filter(Boolean).slice(0, 8);
+}
+async function ioSample() {
+  if (!ssh || IO?.busy) return;
+  if (!IO || IO.ssh !== ssh) IO = { ssh, since: Date.now(), hosts: await nasHosts().catch(() => []), socks: new Map(), disk0: null, nasRx: 0, nasTx: 0, last: null, rate: { rx: 0, tx: 0, rd: 0, wr: 0 } };
+  const me = IO; me.busy = true;
+  try {
+    const r = JSON.parse((await sh(`python3 - ${q(me.hosts.join(','))}`, { stdin: NETIO_PY, timeout: 15000 })).trim());
+    const now = Date.now(), d = r.disks.find(x => /^mmcblk/.test(x.name)) || r.disks[0];
+    if (!me.disk0 && d) me.disk0 = { ...d };
+    let rx = 0, tx = 0;
+    const seen = new Map();
+    for (const k of r.socks) {
+      const p = me.socks.get(k.c);
+      // connections open when the session began only count from then on; new ones count in full
+      if (p) { rx += Math.max(0, k.rx - p.rx); tx += Math.max(0, k.tx - p.tx); } else if (me.last) { rx += k.rx; tx += k.tx; }
+      seen.set(k.c, { rx: k.rx, tx: k.tx });
+    }
+    me.socks = seen; me.nasRx += rx; me.nasTx += tx;
+    if (me.last) {
+      const dt = Math.max(1, (now - me.last.t) / 1000);
+      me.rate = { rx: rx / dt, tx: tx / dt, rd: d && me.last.d ? Math.max(0, d.rd - me.last.d.rd) / dt : 0, wr: d && me.last.d ? Math.max(0, d.wr - me.last.d.wr) / dt : 0 };
+    }
+    me.last = { t: now, d, open: r.socks.length, ips: r.ips };
+  } catch (e) { me.err = e.message; }
+  finally { me.busy = false; }
+}
+setInterval(() => { ioSample().catch(() => {}); }, 5000);
+function ioGet() {
+  if (!ssh || !IO || IO.ssh !== ssh || !IO.last) return { online: !!ssh, ready: false };
+  const d = IO.last.d, d0 = IO.disk0;
+  return { online: true, ready: true, since: IO.since, hosts: IO.hosts, open: IO.last.open,
+    emmc: d ? { name: d.name, sessRd: d.rd - d0.rd, sessWr: d.wr - d0.wr, bootRd: d.rd, bootWr: d.wr } : null,
+    nas: { rx: IO.nasRx, tx: IO.nasTx }, rate: IO.rate, err: IO.err || '' };
 }
 
 // ---------- local NFO files ----------
@@ -338,7 +787,7 @@ async function installStatsHelper({ port } = {}) {
   const dir = `${KH}/addons/${helpersvc.ID}`, prof = `${KH}/userdata/addon_data/${helpersvc.ID}`;
   await exec(`mkdir -p ${q(dir)} ${q(prof)} && tar -C ${q(dir)} -xf - && printf %s ${q(tok)} > ${q(prof + '/token')} && chmod 600 ${q(prof + '/token')}`,
     { stdin: buildTar({ 'addon.xml': helpersvc.addonXml(), 'service.py': helpersvc.servicePy(STATS_SH(), port || 8099) }) });
-  cfg.conn.helperToken = seal(tok); cfg.conn.helperPort = +port || 8099; saveCfg();
+  cfg.conn.helperToken = seal(tok); cfg.conn.helperPort = +port || 8099; (cfg.installed ||= []).includes('service.kodicontrol') || cfg.installed.push('service.kodicontrol'); saveCfg();
   let enabled = false;
   try { enabled = (await rpc('Addons.GetAddonDetails', { addonid: helpersvc.ID, properties: ['enabled'] })).addon.enabled; } catch {}
   if (!enabled) {
@@ -782,6 +1231,7 @@ async function applySkin(id, t) {
 
   const extras = {};
   if (t.posters) { extras['extras/kc/mask.png'] = png.roundedMask(+t.radius || 12); extras['extras/kc/mask_wide.png'] = png.roundedMask(+t.radius || 12, 640, 360); }
+  if (t.seekPreview) { if (!extras['extras/kc/mask_wide.png']) extras['extras/kc/mask_wide.png'] = png.roundedMask(+t.radius || 12, 640, 360); extras['extras/kc/white.png'] = png.white(); }
   if ((t.bgs && t.bgs.some(b => +b.dim)) || (t.fullArt && t.fullArtMode === 'top')) extras['extras/kc/white.png'] = png.white();
   if (t.fullArt && t.fullArtMode === 'top') extras['extras/kc/fade_v.png'] = png.fadeV();
   if (t.glass) extras['extras/kc/glass.png'] = png.glass();
@@ -817,7 +1267,7 @@ async function applySkin(id, t) {
     } else report.push({ ok: false, text: 'Home bar items: this skin does not use Skin Shortcuts, so its menu cannot be filtered from here' });
   } else await restoreMenu(id);
 
-  if (t.osdZoom) report.push({ ok: true, text: await ensureHelper() });
+  if (t.osdZoom || t.seekPreview) report.push({ ok: true, text: await ensureHelper() });
   const via = await builtin('ReloadSkin()').catch(e => 'failed: ' + e.message);
   report.push({ ok: !via.startsWith('failed'), text: via.startsWith('failed') ? `Skin reload ${via}` : `Skin reloaded (${via})` });
   return { report };
@@ -988,16 +1438,23 @@ const handlers = {
     for (const [p, e] of Object.entries(expect)) {
       const on = list.filter(r => r.port === +p && r.proto === (+p === es ? 'udp' : 'tcp'));
       const other = on.filter(r => r.prog && !/kodi/.test(r.prog));
-      if (other.length) issues.push({ bad: true, text: `Port ${p} is meant for ${e.svc} but ${other.map(r => r.prog).join(', ')} holds it: change one of them` });
-      else if (!on.length && +p === help && cfg.conn.via === 'helper') issues.push({ bad: true, text: `The helper add-on should listen on ${p} but nothing does: Kodi may not have started it (restart Kodi, or reinstall it from Connection)` });
-      else if (!on.length && +p === web && set.webserver === 'true') issues.push({ bad: true, text: `Kodi's web server is on but nothing listens on ${p}: another program may have had the port when Kodi started` });
-      else if (!on.length && +p === 9090) issues.push({ bad: true, text: 'Nothing listens on 9090: turn on "Allow remote control from applications on this system" in Kodi' });
+      if (other.length) issues.push({ bad: true, port: +p, text: `Port ${p} is meant for ${e.svc} but ${other.map(r => r.prog).join(', ')} holds it: change one of them` });
+      else if (!on.length && +p === help && cfg.conn.via === 'helper') issues.push({ bad: true, port: +p, text: `The helper add-on should listen on ${p} but nothing does: Kodi may not have started it (restart Kodi, or reinstall it from Connection)` });
+      else if (!on.length && +p === web && set.webserver === 'true') issues.push({ bad: true, port: +p, text: `Kodi's web server is on but nothing listens on ${p}: another program may have had the port when Kodi started` });
+      else if (!on.length && +p === 9090) issues.push({ bad: true, port: 9090, text: 'Nothing listens on 9090: turn on "Allow remote control from applications on this system" in Kodi' });
     }
     const local = list.filter(r => r.port === 9090 && /^(127\.|::1)/.test(r.addr));
     if (local.length && !list.some(r => r.port === 9090 && r.addr.includes('all'))) issues.push({ bad: false, text: 'JSON-RPC 9090 only listens on the box itself: fine for this app (it goes through SSH); other apps on the network need "Allow remote control from applications on other systems"' });
     const dup = {};
     for (const r of list) { const k = r.proto + r.port; (dup[k] ||= new Set()).add(r.prog || '?'); }
-    for (const [k, progs] of Object.entries(dup)) if (progs.size > 1) issues.push({ bad: true, text: `${k.replace(/^(tcp|udp)/, '$1 ')} is open by more than one program: ${[...progs].join(', ')}` });
+    for (const [k, progs] of Object.entries(dup)) if (progs.size > 1) issues.push({ bad: true, port: +k.replace(/D/g, ''), text: `${k.replace(/^(tcp|udp)/, '$1 ')} is open by more than one program: ${[...progs].join(', ')}` });
+    // two of the configured ports set to the same number: whichever starts second can't open it
+    const cfgd = [['Kodi web server', web, 'tcp'], ['Kodi JSON-RPC', 9090, 'tcp'], ['Kodi EventServer', es, 'udp'], ...(cfg.conn.via === 'helper' ? [['Kodi Control helper', help, 'tcp']] : [])];
+    for (let i = 0; i < cfgd.length; i++) for (let j = i + 1; j < cfgd.length; j++)
+      if (cfgd[i][1] === cfgd[j][1] && cfgd[i][2] === cfgd[j][2]) issues.push({ bad: true, port: cfgd[i][1], text: `${cfgd[i][0]} and ${cfgd[j][0]} are both set to port ${cfgd[i][1]}: only one can have it` });
+    // well-known ports taken by something unexpected (e.g. a web add-on on Samba's 445)
+    for (const r of list) if (KNOWN[r.port] && r.prog && r.port < 1024 && /kodi/.test(r.prog) && r.port !== 22) issues.push({ bad: true, port: r.port, text: `Kodi (or one of its add-ons) holds port ${r.port}, normally ${KNOWN[r.port]}` });
+    for (const r of list) r.warn = issues.filter(i => i.bad && i.port === r.port).map(i => i.text).join(' · ');
     return { list, issues, settings: { web, es, helper: help } };
   },
   // Live view text: fills Kodi's on-screen keyboard (done = press OK), or reports whether one is open now
@@ -1008,8 +1465,56 @@ const handlers = {
     const g = await rpc('GUI.GetProperties', { properties: ['currentwindow'] }).catch(() => null);
     return { open: !!(g && g.currentwindow && g.currentwindow.id === 10103), title: (g && g.currentwindow && g.currentwindow.label) || r['System.CurrentWindow'] || '', value: r['Control.GetLabel(312)'] || '' };
   },
+  'addons:list': () => { if (!ssh) throw new Error('Not connected'); return addonsList(); },
+  'addons:enable': a => { if (!ssh) throw new Error('Not connected'); return addonEnable(a); },
+  // seek preview: ffmpeg on the box, the service's settings file, and Kodi's own seek delay / steps
+  'seek:status': async () => {
+    if (!ssh) throw new Error('Not connected');
+    const ff = (await sh(`for p in ${q(KH + '/addons/tools.ffmpeg-tools/bin/ffmpeg')} $(command -v ffmpeg 2>/dev/null); do [ -x "$p" ] && { echo "$p"; break; }; done; true`)).trim();
+    const conf = (await sh(`cat ${q(KH + '/userdata/addon_data/script.kodicontrol/seek.json')} 2>/dev/null`)).trim();
+    const [delay, steps] = await Promise.all(['videoplayer.seekdelay', 'videoplayer.seeksteps'].map(s => rpc('Settings.GetSettingValue', { setting: s }).then(r => r.value).catch(() => null)));
+    let c = {}; try { c = JSON.parse(conf); } catch {}
+    return { ffmpeg: ff, conf: c, delay, steps, cached: (await sh(`du -sk ${q(KH + '/temp/kcseek')} 2>/dev/null | cut -f1`)).trim() };
+  },
+  'seek:installFfmpeg': async () => {
+    if (!ssh) throw new Error('Not connected');
+    await builtin('InstallAddon(tools.ffmpeg-tools)');
+    if (!(cfg.installed ||= []).includes('tools.ffmpeg-tools')) { cfg.installed.push('tools.ffmpeg-tools'); saveCfg(); }
+    return 'Kodi is asking on the TV to install "FFmpeg Tools" from the CoreELEC repository. Confirm there, then press Check again.';
+  },
+  'seek:save': async ({ on, step, width, delay, steps }) => {
+    if (!ssh) throw new Error('Not connected');
+    const c = { on: !!on, step: Math.max(2, Math.min(60, +step || 10)), width: Math.max(160, Math.min(640, +width || 384)) };
+    if (!cfg.seekOrig) {
+      const [d0, s0] = await Promise.all(['videoplayer.seekdelay', 'videoplayer.seeksteps'].map(k => rpc('Settings.GetSettingValue', { setting: k }).then(r => r.value).catch(() => null)));
+      if (d0 != null) cfg.seekOrig = { delay: d0, steps: s0 || SEEK_DEFAULT.steps };
+    }
+    cfg.seek = { ...c, delay, steps }; saveCfg();
+    await exec(`mkdir -p ${q(KH + '/userdata/addon_data/script.kodicontrol')} && cat > ${q(KH + '/userdata/addon_data/script.kodicontrol/seek.json')}`, { stdin: JSON.stringify(c) });
+    const notes = [await ensureHelper()];
+    if (delay != null) { await rpc('Settings.SetSettingValue', { setting: 'videoplayer.seekdelay', value: Math.max(0, Math.min(3000, Math.round(+delay / 250) * 250)) }); notes.push(`seek delay ${delay} ms`); }
+    if (Array.isArray(steps) && steps.length) { await rpc('Settings.SetSettingValue', { setting: 'videoplayer.seeksteps', value: steps.map(Number) }); notes.push(`seek steps ${steps.join(', ')} s`); }
+    return notes.join(' · ');
+  },
+  'seek:clearCache': async () => { await exec(`rm -rf ${q(KH + '/temp/kcseek')}`); return true; },
+  'undo:status': () => { if (!ssh) throw new Error('Not connected'); return undoStatus(); },
+  'addons:remove': id => { if (!ssh) throw new Error('Not connected'); return removeAddon(id); },
+  'seek:default': () => { if (!ssh) throw new Error('Not connected'); return seekDefault(); },
+  'keymap:default': () => { if (!ssh) throw new Error('Not connected'); return keymapDefault(); },
+  'addons:undo': () => { if (!ssh) throw new Error('Not connected'); return addonsUndo(); },
+  'art:undo': () => { if (!ssh) throw new Error('Not connected'); return artUndo(); },
+  'iptv:undo': () => { if (!ssh) throw new Error('Not connected'); return iptvUndo(); },
+  'io:get': () => ioGet(),
+  'io:reset': () => { IO = null; ioSample().catch(() => {}); return true; },
+  'zoom:get': () => zoomList(),
+  'zoom:save': async list => {
+    cfg.zoom = list.map(Number).filter(v => isFinite(v) && v >= 0 && v <= 1).slice(0, 8);
+    saveCfg();
+    // the helper add-on holds the presets the OSD button cycles through: rewrite it straight away when connected
+    return ssh ? await ensureHelper() : 'Saved. The helper add-on is updated the next time you connect.';
+  },
   'zoom:set': async i => {
-    const z = [1.0, 1.2, 1.35][i] || 1;
+    const z = 1 + (zoomList()[i] || 0);
     const players = await rpc('Player.GetActivePlayers');
     if (!players.some(p => p.type === 'video')) throw new Error('Nothing is playing');
     await rpc('Player.SetViewMode', { viewmode: z === 1 ? 'normal' : { zoom: z } });
@@ -1048,9 +1553,10 @@ const handlers = {
   'saved:set': list => { cfg.saved = list; saveCfg(); return true; },
 };
 const needSsh = fn => async a => { if (!ssh) throw new Error('Not connected'); return fn(a); };
-const extra = features.make({ exec, sh, q, rpc, builtin, cfg: () => cfg, saveCfg, kh: () => KH, has: () => HAS, dialog, win: () => win, app, send });
+const extra = features.make({ exec, sh, stream, q, rpc, builtin, cfg: () => cfg, saveCfg, kh: () => KH, has: () => HAS, dialog, win: () => win, app, send });
 for (const [ch, fn] of Object.entries(extra)) handlers[ch] = ch.startsWith('pick:') || ch === 'keymap:preview' ? fn : needSsh(fn);
-handlers['iftop:install'] = needSsh(async () => { const r = await extra['iftop:install'](); await probe(); return r; });
+const markInstalled = id => { if (!(cfg.installed ||= []).includes(id)) { cfg.installed.push(id); saveCfg(); } };
+handlers['iftop:install'] = needSsh(async () => { const r = await extra['iftop:install'](); if (r.how === 'System Tools add-on') markInstalled('virtual.system-tools'); await probe(); return r; });
 
 for (const [ch, fn] of Object.entries(handlers)) {
   ipcMain.handle(ch, async (e, arg) => {

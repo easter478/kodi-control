@@ -73,7 +73,7 @@ function keyName(id) {
 }
 
 function make(ctx) {
-  const { exec, sh, q, rpc, builtin, cfg, saveCfg, kh, has, dialog, win, app, send = () => {} } = ctx;
+  const { exec, sh, stream, q, rpc, builtin, cfg, saveCfg, kh, has, dialog, win, app, send = () => {} } = ctx;
 
   // ---------- live preview ----------
   // A fresh file name per shot means no "rm first" round trip; the poll loop deletes it after reading.
@@ -86,6 +86,64 @@ function make(ctx) {
     if (r.out.length < 100) throw new Error('Kodi did not write a screenshot');
     return 'data:image/png;base64,' + r.out.toString('base64');
   }
+  // ---------- live video layer (Amlogic) ----------
+  // Kodi's screenshots hold only the GUI: on Amlogic the video sits on its own hardware plane. /dev/amvideocap0
+  // hands out that plane's current frame (BGR, scaled to the size asked for) in ~15 ms, so a small Python loop on
+  // the box streams frames: "KCVF" + width, height, byte count (big-endian) + zlib data; byte count 0 = no video.
+  const VCAP_PY = String.raw`import os, sys, time, zlib, fcntl, struct
+W, H, FPS = int(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3])
+out = sys.stdout.buffer
+end = time.time() + 3600
+while time.time() < end:
+    t = time.time()
+    d = b''
+    try:
+        fd = os.open('/dev/amvideocap0', os.O_RDWR)
+        try:
+            fcntl.ioctl(fd, 0x40045602, W); fcntl.ioctl(fd, 0x40045603, H)
+            d = os.read(fd, W * H * 3)
+        finally:
+            os.close(fd)
+    except Exception:
+        d = b''
+    z = zlib.compress(d, 1) if len(d) == W * H * 3 else b''
+    out.write(b'KCVF' + struct.pack('>III', W, H, len(z)) + z); out.flush()
+    time.sleep(max(0.0, (1.0 / FPS if z else 0.5) - (time.time() - t)))
+`;
+  let vcap = null;
+  function videoStart({ w = 640, fps = 10 } = {}) {
+    videoStop();
+    w = Math.max(160, Math.min(1920, Math.round(+w / 16) * 16)); const h = Math.round(w * 9 / 16 / 2) * 2;
+    fps = Math.max(1, Math.min(30, +fps || 10));
+    let buf = Buffer.alloc(0), frames = 0, t0 = Date.now(), dar = 0, darAt = 0;
+    const me = vcap = {
+      s: stream(`[ -e /dev/amvideocap0 ] || { echo 'No /dev/amvideocap0 on this box: the video layer needs an Amlogic device (CoreELEC)' >&2; exit 3; }; python3 - ${w} ${h} ${fps}`, {
+        stdin: VCAP_PY,
+        onData: d => {
+          buf = buf.length ? Buffer.concat([buf, d]) : d;
+          for (;;) {
+            const i = buf.indexOf('KCVF');
+            if (i < 0 || buf.length < i + 16) break;
+            const n = buf.readUInt32BE(i + 12);
+            if (buf.length < i + 16 + n) break;
+            const fw = buf.readUInt32BE(i + 4), fh = buf.readUInt32BE(i + 8), z = buf.subarray(i + 16, i + 16 + n);
+            buf = buf.subarray(i + 16 + n);
+            if (vcap !== me) return;
+            frames++;
+            // the frame comes scaled to 16:9; the film's own shape (2.39:1 etc.) is asked from Kodi every few seconds
+            if (Date.now() - darAt > 4000) { darAt = Date.now(); rpc('XBMC.GetInfoLabels', { labels: ['Player.Process(videodar)'] }).then(r => { dar = parseFloat(r['Player.Process(videodar)']) || 0; }).catch(() => {}); }
+            let data = null;
+            try { if (n) data = require('zlib').inflateSync(z); } catch {}
+            send('preview:frame', { w: fw, h: fh, data, dar, fps: frames / Math.max(1, (Date.now() - t0) / 1000) });
+          }
+        },
+        onClose: err => { if (vcap === me) { vcap = null; send('preview:frame', { stopped: true, error: err || '' }); } },
+      }),
+    };
+    return { w, h, fps };
+  }
+  function videoStop() { if (vcap) { const v = vcap; vcap = null; v.s.close(); } return true; }
+
   const KEYS = { up: 'Input.Up', down: 'Input.Down', left: 'Input.Left', right: 'Input.Right', select: 'Input.Select', back: 'Input.Back', home: 'Input.Home', menu: 'Input.ContextMenu', info: 'Input.Info', osd: 'Input.ShowOSD' };
   async function remote(k) {
     if (KEYS[k]) return rpc(KEYS[k]);
@@ -143,7 +201,33 @@ function make(ctx) {
       const sys = part.startsWith('SYS '), i = part.indexOf('\n'), name = part.slice(sys ? 4 : 5, i).trim();
       files.push({ name, system: sys, binds: parseKeymap(part.slice(i + 1), name).map(b => ({ ...b, label: keyName(b.key), system: sys })) });
     }
-    return { files, ours: cfg().keymaps || [], actions: ACTIONS, windows: WINDOWS, remoteKeys: REMOTE_KEYS, dir: KM_DIR() };
+    // the Keymap Editor add-on's own action and window lists, read from the box (falls back to the short built-in list)
+    const ke = await keymapEditorLists().catch(() => null);
+    const full = ke ? ke.actions : ACTIONS.map(([c, a]) => [c, a.map(x => [x, ''])]);
+    const windows = ke ? [...new Set([...ke.windows.map(w => w[0]), ...WINDOWS.map(w => w.toLowerCase())])] : WINDOWS;
+    return { files, ours: cfg().keymaps || [], actions: full.map(([c, a]) => [c, a.map(x => x[0])]), actionsFull: full, windowNames: ke ? ke.windows : [], fromEditor: !!ke, windows, remoteKeys: REMOTE_KEYS, dir: KM_DIR() };
+  }
+  async function keymapEditorLists() {
+    const dir = `${kh()}/addons/script.keymap/resources`;
+    const raw = await sh(`cat ${q(dir + '/lib/actions.py')} && echo ==PO && cat ${q(dir + '/language/resource.language.en_gb/strings.po')}`);
+    const [py, po = ''] = raw.split('==PO');
+    if (!/_actions\s*=/.test(py)) throw new Error('no Keymap Editor');
+    const tr = {};
+    for (const m of po.matchAll(/msgctxt\s+"#(\d+)"\s*\r?\nmsgid\s+"((?:[^"\\]|\\.)*)"/g)) tr[m[1]] = m[2].replace(/\\"/g, '"');
+    const pairs = body => [...body.matchAll(/"([^"]+)"\s*,\s*tr\((\d+)\)/g)].map(m => [m[1].trim(), tr[m[2]] || m[1].trim()]);
+    const block = name => { const m = new RegExp(name + '\\s*=\\s*\\[([\\s\\S]*?)\\n\\]').exec(py); return m ? m[1] : ''; };
+    const actions = [];
+    for (const m of block('_actions').matchAll(/\["([^"]+)",\s*\[([\s\S]*?)\]\]/g)) actions.push([m[1], pairs(m[2])]);
+    const windows = pairs(block('_windows'));
+    const openable = [...pairs(block('_activate_window')), ...windows.slice(1)];
+    actions.push(['Windows', openable.map(([w, n]) => [`activatewindow(${w})`, 'Open ' + n]).sort((a, b) => a[1].localeCompare(b[1]))]);
+    const ad = [];
+    for (const type of ['xbmc.python.pluginsource', 'xbmc.python.script']) {
+      const r = await rpc('Addons.GetAddons', { type, properties: ['name', 'enabled'] }).catch(() => ({}));
+      for (const a of r.addons || []) if (a.enabled) ad.push([`runaddon(${a.addonid})`, 'Launch ' + a.name]);
+    }
+    actions.push(['Add-ons', ad.sort((a, b) => a[1].localeCompare(b[1]))]);
+    return actions.some(([, a]) => a.length) ? { actions, windows } : Promise.reject(new Error('empty'));
   }
   async function keymapSave(list) {
     cfg().keymaps = list; saveCfg();
@@ -194,6 +278,12 @@ function make(ctx) {
         if (copy) {
           src = `${dest}/${m.kind}-${m.id}-${m.type}${path.posix.extname(m.img).toLowerCase()}`;
           await exec(`cp -f ${q(m.img)} ${q(src)}`);
+        }
+        // remember the artwork Kodi had before the first change, for Media → Undo artwork changes
+        const undo = (cfg().artUndo ||= []);
+        if (!undo.some(u => u.kind === m.kind && u.id === m.id && u.type === m.type)) {
+          const d = m.kind === 'movie' ? await rpc('VideoLibrary.GetMovieDetails', { movieid: m.id, properties: ['art'] }).then(r => r.moviedetails).catch(() => null) : await rpc('VideoLibrary.GetTVShowDetails', { tvshowid: m.id, properties: ['art'] }).then(r => r.tvshowdetails).catch(() => null);
+          if (d) { undo.push({ kind: m.kind, id: m.id, type: m.type, old: (d.art || {})[m.type] || '' }); saveCfg(); }
         }
         const art = { [m.type]: src };
         if (m.kind === 'movie') await rpc('VideoLibrary.SetMovieDetails', { movieid: m.id, art });
@@ -294,7 +384,7 @@ function make(ctx) {
     if (s.refreshMins) set('m3uRefreshIntervalMins', s.refreshMins);
     if (s.epgUrl !== undefined) { set('epgPathType', 1); set('epgUrl', s.epgUrl); }
     if (s.logoFromEpg !== undefined) set('logoFromEpg', s.logoFromEpg);
-    await exec(`cp -f ${q(sf)} ${q(sf + '.kcbak')} 2>/dev/null; cat > ${q(sf)}`, { stdin: xml });
+    await exec(`cp -f ${q(sf)} ${q(sf + '.kcbak')} 2>/dev/null; [ -f ${q(sf + '.kcorig')} ] || cp -f ${q(sf)} ${q(sf + '.kcorig')} 2>/dev/null; cat > ${q(sf)}`, { stdin: xml });
     // Disable and re-enable the add-on so it re-reads its settings and reloads channels.
     let restarted = false;
     try {
@@ -470,6 +560,8 @@ function make(ctx) {
     'kmaddon:set': kmAddonSet,
     'kmaddon:open': kmAddonOpen,
     'preview:shot': screenshot,
+    'preview:videoStart': videoStart,
+    'preview:videoStop': videoStop,
     'preview:key': remote,
     'keymap:list': keymapList,
     'keymap:save': keymapSave,

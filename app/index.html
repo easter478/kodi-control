@@ -44,7 +44,9 @@ h3{font:600 14px var(--head);text-transform:uppercase;letter-spacing:.06em;color
 .grid{display:grid;gap:var(--sp3);grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
 .g2{grid-template-columns:repeat(auto-fit,minmax(360px,1fr))}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--sp3);box-shadow:var(--shadow);backdrop-filter:blur(12px)}
-.kpi{font:600 26px var(--mono);color:var(--fg)}
+.kpi{font:600 26px var(--mono);color:var(--fg);overflow-wrap:anywhere;line-height:1.25}
+.grid>.card{min-width:0}.grid>.card .note{overflow-wrap:anywhere}
+#dOs{font-size:16px!important}
 .kpi small{font-size:13px;color:var(--muted)}
 .label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
 .bar{height:8px;background:var(--surface2);border-radius:9px;overflow:hidden;margin-top:8px}
@@ -85,6 +87,7 @@ th{color:var(--muted);font-weight:500;font-size:12px;text-transform:uppercase}
 .anim-dot{position:absolute;width:14px;height:14px;border-radius:50%;background:#F472B6;box-shadow:0 0 0 4px rgba(244,114,182,.3);cursor:help}
 .osd{position:absolute;left:5%;right:5%;bottom:7%;padding:10px 14px;border-radius:10px;background:rgba(0,0,0,.6);color:#fff;font:12px 'Fira Sans'}
 .osd .tl{height:4px;background:#334155;border-radius:4px;margin:6px 0}.osd .tl i{display:block;width:42%;height:100%;background:#38bdf8;border-radius:4px}
+.seekdemo{position:absolute;bottom:calc(100% + 8px);width:34%;transform:translateX(-50%);left:58%;text-align:center;transition:left .2s}.seekdemo i{display:block;aspect-ratio:16/9;border:3px solid var(--sk,#fff);border-radius:6px;background:linear-gradient(135deg,#7c3aed,#0ea5e9 60%,#f59e0b)}.seekdemo b{display:block;margin-top:3px;font-size:10px;text-shadow:0 1px 2px #000}
 .zoom{display:flex;gap:6px}
 .zoom .btn{padding:5px 10px;font:500 12px var(--mono)}
 .themes{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}
@@ -112,6 +115,12 @@ svg.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke
 .toast.on{opacity:1;transform:none}.toast.err{border-color:var(--danger);color:var(--danger)}
 .report{margin-top:12px;display:flex;flex-direction:column;gap:6px;font-size:13px}
 .report div{display:flex;gap:8px;align-items:flex-start}
+.warnbox{border:1px solid var(--warn);background:color-mix(in srgb,var(--warn) 12%,transparent);color:var(--fg);border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;font-size:13px}
+.warnbox b{color:var(--warn)}
+tr.warnrow td{background:color-mix(in srgb,var(--warn) 10%,transparent)}
+#adTable td:first-child{max-width:300px}#adTable .mono{overflow-wrap:anywhere}#adTable td{padding-left:6px;padding-right:6px}
+th[data-sort]{cursor:pointer;user-select:none;white-space:nowrap}th[data-sort]:hover{color:var(--primary)}
+nav .badge{margin-left:auto;background:var(--warn);color:#000;border-radius:9px;font-size:11px;padding:0 6px;font-weight:700}
 .empty{color:var(--muted);font-size:13px;padding:12px 0}
 pre.con{background:#000;color:#9fef00;border-radius:8px;padding:12px;font:13px/1.45 'Fira Code',monospace;min-height:260px;max-height:420px;overflow:auto;white-space:pre-wrap;word-break:break-all}
 pre.log{background:var(--surface2);border-radius:8px;padding:12px;font:12px/1.45 var(--mono);max-height:420px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin-top:10px}
@@ -131,7 +140,10 @@ label.f input,label.f select{width:100%;color:var(--fg)}
 @keyframes sp{to{transform:rotate(360deg)}}
 .skin .row{margin-top:6px;gap:6px}.skin .btn{padding:3px 8px;font-size:12px}
 .pv{position:relative;background:#000;border-radius:12px;overflow:hidden;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center}
-.pv img{width:100%;height:100%;object-fit:contain;display:block}
+.pv img{width:100%;height:100%;object-fit:contain;display:block;position:relative}
+.pv canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+/* Kodi's screenshot is opaque black where the video plane is: lighten lets the live video show through the black */
+.pv canvas:not([hidden])+img{mix-blend-mode:lighten}
 .pv .empty{position:absolute;color:#94a3b8;text-align:center;padding:20px}
 .remote{display:grid;grid-template-columns:repeat(3,56px);gap:8px;justify-content:center}
 .remote .btn{height:48px;min-width:56px;justify-content:center;padding:0}
@@ -170,9 +182,17 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
     <div class="card"><div class="label">Library</div><div class="kpi" style="font-size:20px" id="dLib">–</div><div class="note" id="dLibN">&nbsp;</div></div>
     <div class="card"><div class="label">System</div><div class="kpi" style="font-size:20px" id="dOs">–</div><div class="note" id="dOsN">&nbsp;</div></div>
   </div>
+  <div class="card" id="ioCard" style="margin-top:16px" hidden><div class="row between"><h3>eMMC and NAS traffic this session</h3><span class="row"><span class="note" id="ioSince"></span><button class="btn" id="ioReset">Start new session</button></span></div>
+    <div class="grid" style="margin-top:6px">
+      <div><div class="label">Read from eMMC</div><div class="kpi" style="font-size:20px" id="ioRd">–</div><div class="note" id="ioRdN">&nbsp;</div></div>
+      <div><div class="label">Written to eMMC</div><div class="kpi" style="font-size:20px" id="ioWr">–</div><div class="note" id="ioWrN">&nbsp;</div></div>
+      <div><div class="label">Read from NAS</div><div class="kpi" style="font-size:20px" id="ioNr">–</div><div class="note" id="ioNrN">&nbsp;</div></div>
+      <div><div class="label">Written to NAS</div><div class="kpi" style="font-size:20px" id="ioNw">–</div><div class="note" id="ioNwN">&nbsp;</div></div>
+    </div>
+    <div class="note" id="ioNote">Counted only while Kodi Control is connected, from the box's own kernel counters. Nothing is installed or saved on the box.</div></div>
   <div class="grid g2" style="margin-top:16px">
     <div class="card"><h3>Now playing</h3><div id="dPlay" class="empty">Nothing playing</div></div>
-    <div class="card"><div class="row between"><h3>Streaming from</h3><span class="row"><button class="btn" id="ifInstall" style="display:none">Install iftop</button><button class="btn" id="ifBtn">Refresh</button></span></div>
+    <div class="card"><div class="row between"><h3>Streaming from</h3><span class="row"><button class="btn" id="ifInstall" style="display:none" title="Installs the System Tools add-on on the box">Install iftop</button><button class="btn" id="ifBtn">Refresh</button></span></div>
       <div id="ifBody" class="empty">Press Refresh to sample traffic for 3 seconds.</div>
       <div class="note" id="ifNote"></div></div>
   </div>
@@ -193,7 +213,7 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
         <div id="vb" style="position:absolute;top:10%;right:5%;width:120px;height:6px;background:rgba(255,255,255,.25);border-radius:6px"><i style="display:block;width:65%;height:100%;background:#38bdf8;border-radius:6px"></i></div>
       </div>
       <div class="note">Rough sketch of what each toggle changes. The real result depends on how the skin is built, so read the report after applying.</div>
-      <div class="row" style="margin-top:12px"><button class="btn p" id="skinApply">Apply to Kodi</button><button class="btn" id="skinRevert">Revert to original</button><span id="skinBusy"></span></div>
+      <div class="row" style="margin-top:12px"><button class="btn p" id="skinApply">Apply to Kodi</button><button class="btn" id="skinRevert">Revert to original</button><button class="btn" id="skinDefault" title="Turn every skin tweak off and put the original skin files back">Default</button><span id="skinBusy"></span></div>
       <div class="report" id="skinReport"></div>
     </div>
     <div class="card"><h3>Home &amp; layout</h3>
@@ -260,9 +280,13 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
       <div class="tv"><div class="osd"><div class="row between"><b id="osdTitle">Now playing</b><span id="osdTime"></span></div><div class="tl"><i></i></div>
         <div class="othumb" id="osdThumb"><span>Play · Subs · Audio</span><span class="btn p">Zoom</span></div></div></div>
       <div class="note" id="osdThumbNote">Pick an OSD style source to see its buttons here. The highlighted one becomes the zoom preset.</div>
-      <div class="note">The zoom preset button cycles zoom <b>0 → 0.20 → 0.35</b> (Kodi zoom 1.0 / 1.2 / 1.35), one press per step. It runs the small Kodi Control helper add-on, which is installed automatically.</div>
+      <div class="note" id="zNote">The zoom preset button cycles through the zoom values below, one press per step. It runs the small Kodi Control helper add-on, which is installed automatically.</div>
+      <h3 style="margin-top:14px">Zoom values</h3>
+      <div class="row" id="zEdit" style="gap:6px"></div>
+      <div class="row" style="margin-top:6px"><button class="btn" id="zAdd">Add value</button><button class="btn" id="zReset" title="Put back 0 · 0.20 · 0.35 and save">Default (0 · 0.20 · 0.35)</button><button class="btn p" id="zSave">Save zoom values</button></div>
+      <div class="note">0 = no zoom, 0.20 = Kodi zoom 1.2. Values from 0 to 1, up to 8 steps. Saving rewrites the helper add-on on the box, so the OSD button uses them straight away.</div>
       <h3 style="margin-top:14px">Try it now on the TV</h3>
-      <div class="row"><button class="btn" data-z="0">Zoom 0</button><button class="btn" data-z="1">Zoom 0.20</button><button class="btn" data-z="2">Zoom 0.35</button></div>
+      <div class="row" id="zTry"></div>
     </div>
     <div class="card"><h3>Edit OSD</h3>
       <label class="f" style="margin-bottom:10px">Target skin<select id="osdSkin"></select></label>
@@ -272,11 +296,32 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
       <div class="tog"><span>Transparent OSD<div class="note">Clears the OSD backgrounds; the play button, progress bar and button row stay visible</div></span><div class="sw" data-o="osdClear"></div></div>
       <div style="padding:10px 0;border-bottom:1px solid var(--border)"><div class="row between"><span>Progress bar thickness</span><span class="mono" id="obv">stock</span></div><input type="range" min="0" max="20" step="1" value="0" id="ob"><div class="note">0 = skin default. Lower = thinner bar (pixels).</div></div>
       <div style="padding-top:10px"><div class="row between"><span>OSD buttons<div class="note">Untick to hide a button</div></span><button class="btn" id="obLoad">Load buttons</button></div><div class="chips" id="osdBtns" style="margin-top:8px"><span class="empty">Press Load buttons.</span></div></div>
-      <div class="row" style="margin-top:12px"><button class="btn p" id="osdApply">Apply OSD</button><button class="btn" id="osdHelper">Install helper only</button><span id="osdBusy"></span></div>
+      <div class="row" style="margin-top:12px"><button class="btn p" id="osdApply">Apply OSD</button><button class="btn" id="osdHelper">Install helper only</button><button class="btn" id="osdDefault" title="Stock OSD: no zoom button, no borrowed OSD, no seek preview">Default OSD</button><span id="osdBusy"></span></div>
       <div class="note">Applying also applies this skin's other tweaks from the Skin tweaks page, because both are built from the skin's original files.</div>
       <div class="report" id="osdReport"></div>
     </div>
   </div>
+  <div class="card" style="margin-top:16px"><div class="row between"><h3>Seek preview <span class="tag warn" title="ffmpeg decodes frames on the box in the background during playback, and reads extra data from the NAS or stream">heavy on the box</span></h3><div class="sw" data-o="seekPreview" role="switch" aria-label="Seek preview"></div></div>
+    <p class="note" style="margin:0 0 10px">Like Netflix or Prime Video: while you seek, a box above the progress bar shows the frame you are about to jump to, with its time. Seeking waits for the seek delay, so you can press several times and watch the preview before it jumps. Frames are made on the box by ffmpeg, cached, and fetched first around where you are watching. Works for files on the box or a USB drive, SMB and NFS shares (read through Kodi itself, so no share password is needed) and http streams.</p>
+    <div class="grid g2" style="gap:16px">
+      <div>
+        <div class="tv" style="margin-bottom:8px"><div class="osd"><div class="seekdemo" id="skDemo"><i></i><b>01:12:40 / 02:05:00</b></div><div class="tl"><i style="width:58%"></i></div></div></div>
+        <label class="f" style="margin-bottom:8px">Where the box sits<select id="skPlace"><option value="follow">Follows the seek position along the bar</option><option value="center">Centred above the bar</option></select></label>
+        <label class="f" style="margin-bottom:8px">Size<select id="skSize"><option value="small">Small (288 px)</option><option value="medium" selected>Medium (384 px)</option><option value="large">Large (512 px)</option></select></label>
+        <div><div class="row between"><span>Height above the bottom</span><span class="mono" id="skBotV">230 px</span></div><input type="range" min="80" max="600" step="10" value="230" id="skBot" style="width:100%"><div class="note">Raise it if the box covers the skin's progress bar.</div></div>
+        <label class="f" style="margin-top:8px">Frame colour<select id="skColor"><option value="FFFFFFFF">White</option><option value="FF000000">Black</option><option value="FF20A0FF">Blue</option><option value="FFE50914">Red</option><option value="00FFFFFF">No frame</option></select></label>
+      </div>
+      <div>
+        <div class="row between"><span>ffmpeg on the box</span><span id="skFf" class="note">–</span></div>
+        <div class="row" style="margin:6px 0 10px"><button class="btn" id="skCheck">Check</button><button class="btn" id="skInstall">Install FFmpeg Tools</button><button class="btn" id="skClear">Clear cached frames</button><button class="btn" id="skDefault" title="Service off, cached frames deleted, Kodi's seek delay and steps put back">Default seek settings</button><button class="btn" id="skRemove" style="display:none" title="Uninstall FFmpeg Tools from the box">Remove FFmpeg Tools</button></div>
+        <label class="f" style="margin-bottom:8px">A frame every<select id="skStep"><option value="5">5 seconds</option><option value="10" selected>10 seconds</option><option value="15">15 seconds</option><option value="30">30 seconds</option></select></label>
+        <div><div class="row between"><span>Seek delay</span><span class="mono" id="skDelayV">1000 ms</span></div><input type="range" min="250" max="3000" step="250" value="1000" id="skDelay" style="width:100%"><div class="note">How long Kodi waits after your last press before it jumps (Kodi's "Seek delay"). Longer = more time to look at the preview.</div></div>
+        <label class="f" style="margin-top:8px">Seek steps (left / right)<select id="skSteps"><option value="-10,10">±10 s</option><option value="-30,-10,10,30">±10 s, 30 s</option><option value="-60,-30,-10,10,30,60">±10 s, 30 s, 1 min</option><option value="-300,-60,-30,-10,10,30,60,300" selected>±10 s, 30 s, 1 min, 5 min</option><option value="-600,-300,-60,-30,-10,10,30,60,300,600">±10 s … 10 min</option><option value="">Keep Kodi's setting</option></select></label>
+        <div class="note">Pressing again within the delay moves to the next, bigger step, like holding a scrub button.</div>
+        <div class="row" style="margin-top:10px"><button class="btn p" id="skSave">Save seek settings</button><span class="note" id="skNote" style="margin:0"></span></div>
+        <div class="note">The box itself is added to the skin when you press Apply OSD above.</div>
+      </div>
+    </div></div>
   <div class="card" style="margin-top:16px"><h3>Top 20 skins</h3><p class="note" style="margin:0 0 10px">Installed skins can be used as the OSD source. Missing ones can be installed from the Kodi repository.</p><div class="skins" id="skins"></div></div>
 </section>
 
@@ -286,10 +331,10 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
   <div class="row between"><h1>Live view</h1>
     <div class="row"><span class="note">Live</span><div class="sw on" id="pvLive"></div>
       <select id="pvRate"><option value="0">as fast as possible</option><option value="1000">every 1 s</option><option value="1500" selected>every 1.5 s</option><option value="3000">every 3 s</option><option value="6000">every 6 s</option></select>
-      <button class="btn" id="pvNow">Refresh now</button><button class="btn" id="pvCopy">Copy image</button><button class="btn" id="pvSave">Save PNG</button></div></div>
-  <p class="sub">Kodi's own screenshots of the TV, pulled over SSH. Menus and the OSD show; on Amlogic boxes (CoreELEC) the video itself sits on a hardware plane and usually comes out black. "As fast as possible" takes the next shot the moment the last one arrives; each frame is still a few hundred ms old because Kodi has to render, encode and send a PNG. Real zero-delay video needs an HDMI capture card on the PC.</p>
+      <span class="note">Video <span class="tag warn" title="Copies the video plane about 15 times a second: box CPU and network">heavy</span></span><div class="sw" id="pvVidOn" role="switch" aria-label="Live video layer" title="Stream the video plane itself (Amlogic boxes)"></div><select id="pvVidQ" aria-label="Video quality"><option value="480,12">480p · 12 fps</option><option value="640,15" selected>640 · 15 fps</option><option value="960,10">960 · 10 fps</option><option value="1280,6">1280 · 6 fps</option><option value="320,25">320 · 25 fps</option></select><button class="btn" id="pvNow">Refresh now</button><button class="btn" id="pvCopy">Copy image</button><button class="btn" id="pvSave">Save PNG</button><button class="btn" id="pvDefault" title="Live on, every 1.5 s, video layer off, 640 · 15 fps">Default view</button></div></div>
+  <p class="sub">Kodi's own screenshots of the TV, pulled over SSH. Menus and the OSD show; on Amlogic boxes (CoreELEC) the video itself sits on a hardware plane and usually comes out black. "As fast as possible" takes the next shot the moment the last one arrives; each frame is still a few hundred ms old because Kodi has to render, encode and send a PNG. Turn on <b>Video</b> to stream the video plane itself (Amlogic only, read from /dev/amvideocap0 on the box): it plays live at up to 25 fps under the menus and OSD. Real zero-delay full quality still needs an HDMI capture card.</p>
   <div class="grid" style="grid-template-columns:minmax(0,1fr) 220px;align-items:start">
-    <div class="card" style="padding:10px"><div class="pv"><img id="pvImg" alt="Kodi screen"><div class="empty" id="pvEmpty">Connect, then open this page to see the TV.</div></div><div class="note" id="pvNote" style="margin-top:8px">&nbsp;</div></div>
+    <div class="card" style="padding:10px"><div class="pv"><canvas id="pvVid" hidden></canvas><img id="pvImg" alt="Kodi screen"><div class="empty" id="pvEmpty">Connect, then open this page to see the TV.</div></div><div class="note" id="pvNote" style="margin-top:8px">&nbsp;</div></div>
     <div class="card"><h3>Remote</h3>
       <div class="remote">
         <button class="btn" data-rk="menu" title="Context menu (C)">Menu</button><button class="btn" data-rk="up" aria-label="Up">▲</button><button class="btn" data-rk="info" title="Info (I)">Info</button>
@@ -310,22 +355,22 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
 <!-- KEYMAPS -->
 <section class="page" id="keymaps">
   <div class="row between"><h1>Keymaps</h1>
-    <div class="row"><button class="btn" id="kmLoad">Load from box</button><button class="btn" id="kmLearn">Learn a key</button><button class="btn" id="kmAdd">Add binding</button><button class="btn" id="kmXml">Preview XML</button><button class="btn p" id="kmSave">Save &amp; reload</button></div></div>
+    <div class="row"><button class="btn" id="kmLoad">Load from box</button><button class="btn" id="kmLearn">Learn a key</button><button class="btn" id="kmAdd">Add binding</button><button class="btn" id="kmXml">Preview XML</button><button class="btn p" id="kmSave">Save &amp; reload</button><button class="btn" id="kmDefault" title="Delete kodicontrol.xml from the box and reload: Kodi's own keymaps again">Default keymaps</button></div></div>
   <p class="sub">Does what the Keymap Editor add-on does: bind any keyboard key or remote button to a Kodi action, per window. Saved to <span class="mono" id="kmFile">userdata/keymaps/kodicontrol.xml</span> and reloaded right away, no restart.</p>
   <div class="card"><h3>Your bindings</h3>
     <div class="scroll" style="max-height:none"><table class="t km" id="kmTable"></table></div>
     <div class="note" id="kmNote">Learn a key: press Learn, then press the button on the remote or keyboard within 10 seconds. Kodi debug logging is switched on for that moment only.</div>
     <pre class="log" id="kmPre" style="display:none"></pre></div>
   <div class="card" style="margin-top:16px"><div class="row between"><h3>Last key pressed</h3>
-      <div class="row"><span class="note">Watch while this page is open</span><div class="sw on" id="kwOn" role="switch" aria-label="Watch key presses"></div></div></div>
+      <div class="row"><span class="note">Watch while this page is open <span class="tag warn" title="Kodi debug logging is on while watching, which writes to the eMMC">writes debug log</span></span><div class="sw on" id="kwOn" role="switch" aria-label="Watch key presses"></div></div></div>
     <div class="kw"><div class="kwKey" id="kwKey">–</div><div><div id="kwInfo" class="note" style="margin:0">Press any key on the remote or keyboard.</div>
       <button class="btn" id="kwAdd" style="margin-top:8px" disabled>Bind this key</button></div></div>
     <div class="scroll" style="max-height:160px;margin-top:10px"><table class="t" id="kwHist"></table></div>
     <div class="note" id="kwNote">Reads kodi.log over SSH about 3 times a second. Kodi debug logging is on only while this page is open (Kodi shows its debug overlay meanwhile).</div></div>
   <div class="card" style="margin-top:16px"><div class="row between"><h3>Keymap files on the box</h3><button class="btn" id="kmImportAll" title="Copy every binding from gen.xml (Keymap Editor add-on) and the other userdata keymaps into your bindings">Import all current keymaps</button></div><div id="kmFiles" class="empty">Press Load from box.</div></div>
   <div class="card" style="margin-top:16px"><h3>What each key does now</h3>
-    <p class="note" style="margin:0 0 10px">Every keymap Kodi loads, in its order: Kodi's defaults, then userdata/keymaps (including the Keymap Editor add-on's gen.xml). A later file wins for the same window, device and key; the ones it beats are struck through.</p>
-    <div class="row" style="gap:10px;flex-wrap:wrap"><input id="kaFind" placeholder="Search key, button or action" style="flex:1;min-width:180px"><select id="kaWin"><option value="">All windows</option></select><label class="row" style="gap:6px"><input type="checkbox" id="kaSys" checked> Kodi's defaults</label></div>
+    <p class="note" style="margin:0 0 10px">Every keymap Kodi loads, in its order: Kodi's defaults, then userdata/keymaps (including the Keymap Editor add-on's gen.xml). A later file wins for the same window, device and key; the ones it beats are struck through. Click a column to sort, or Edit to change what a key does.</p>
+    <div class="row" style="gap:10px;flex-wrap:wrap"><input id="kaFind" placeholder="Search key, button or action" style="flex:1;min-width:180px"><select id="kaWin" aria-label="Window"><option value="">All windows</option></select><select id="kaDev" aria-label="Device"><option value="">All devices</option></select><label class="row" style="gap:6px"><input type="checkbox" id="kaSys" checked> Kodi's defaults</label></div>
     <div class="note" id="kaCount" style="margin:8px 0">Press Load from box.</div>
     <div style="max-height:480px;overflow:auto"><table class="t" id="kaTable"></table></div></div>
   <div class="card" style="margin-top:16px"><div class="row between"><h3>Keymap Editor add-on settings</h3><span class="note" id="kaVer"></span></div>
@@ -334,7 +379,7 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
       <div class="row between" style="margin:8px 0"><span>Support multiple keymap files<br><span class="note">Lets the add-on write to its own file name below instead of gen.xml.</span></span><div class="sw" id="kaMulti" role="switch" aria-label="Support multiple keymap files"></div></div>
       <label class="f" style="margin:8px 0">Keymap Editor file name<input id="kaFile" placeholder="gen" aria-describedby="kaHelp"></label>
       <div class="note" id="kaHelp">Keymaps load alphabetically and later files win. Don't name it after a file made outside the Keymap Editor (such as kodicontrol).</div>
-      <div class="row" style="margin-top:10px"><button class="btn p" id="kaSave">Save settings</button><button class="btn" id="kaOpen">Open settings on TV</button><button class="btn" id="kaRun">Run Keymap Editor on TV</button></div>
+      <div class="row" style="margin-top:10px"><button class="btn p" id="kaSave">Save settings</button><button class="btn" id="kaOpen">Open settings on TV</button><button class="btn" id="kaRun">Run Keymap Editor on TV</button><button class="btn" id="kaDefault" title="Long press off, single file, gen.xml">Default</button></div>
     </div>
     <div class="note" id="kaNote">Press Load from box.</div></div>
   <datalist id="kmActs"></datalist><datalist id="kmWins"></datalist><datalist id="kmKeys"></datalist>
@@ -373,11 +418,11 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
     <div class="scroll" style="margin-top:10px"><table class="t" id="usbTable"></table></div>
     <div class="row between" style="margin-top:10px">
       <div class="tog" style="border:0;padding:0;gap:10px"><span>Copy images into the Kodi folder <span class="note">keeps working after the drive is unplugged</span></span><div class="sw on" id="usbCopy"></div></div>
-      <button class="btn p" id="usbApply" disabled>Set selected art</button></div>
+      <span class="row"><button class="btn" id="usbUndo" title="Put back the artwork each item had before Kodi Control changed it">Undo artwork changes</button><button class="btn p" id="usbApply" disabled>Set selected art</button></span></div>
     <div class="note" id="usbNote"></div></div>
 
   <div class="grid g2" style="margin-top:16px">
-    <div class="card"><div class="row between"><h3>M3U playlists</h3><button class="btn" id="m3uRefresh">Refresh</button></div>
+    <div class="card"><div class="row between"><h3>M3U playlists</h3><span class="row"><button class="btn" id="m3uUndo" title="Put IPTV Simple's settings back to how they were before Kodi Control first changed them">Restore original IPTV settings</button><button class="btn" id="m3uRefresh">Refresh</button></span></div>
       <div class="note" id="m3uState">Not loaded.</div>
       <label class="f" style="margin-top:10px">Playlist URL<input id="m3uUrl" placeholder="https://example.com/playlist.m3u"></label>
       <div class="row" style="margin-top:8px"><input id="m3uName" placeholder="File name (optional)" style="flex:1"><button class="btn" id="m3uDl">Download to PC</button></div>
@@ -410,6 +455,27 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
 </section>
 
 <!-- LOGS -->
+<section class="page" id="addons">
+  <div class="row between"><h1>Add-ons</h1><span class="row"><button class="btn" id="adUndo" title="Put every add-on you switched here back the way it was">Undo my add-on changes</button><button class="btn p" id="adScan">Refresh <span class="tag warn" title="Samples Kodi's threads for 1 second">1 s sample</span></button></span></div>
+  <p class="sub">What is running in Kodi right now, what it costs, and a switch to turn any add-on on or off. Python and binary add-ons run inside Kodi's own process, so Linux has no separate memory figure for them: memory here is what an add-on has mapped on its own (a binary add-on's library, a skin's textures) or, for add-ons that start their own program, that program's memory.</p>
+  <div class="grid" style="margin-bottom:16px">
+    <div class="card"><div class="label">Kodi process memory</div><div class="kpi" id="adRss">–</div><div class="note">Shared by every add-on below</div></div>
+    <div class="card"><div class="label">Running add-ons</div><div class="kpi" id="adRun">–</div><div class="note" id="adRunN">&nbsp;</div></div>
+    <div class="card"><div class="label">Busiest right now</div><div class="kpi" style="font-size:18px" id="adTop">–</div><div class="note" id="adTopN">&nbsp;</div></div>
+  </div>
+  <div class="card" id="adSkin"><div class="row between"><div><h3 style="margin:0">Skin info service</h3><div class="note mono">script.skin.info.service</div></div><div class="sw" id="adSkinSw" role="switch" aria-label="Enable script.skin.info.service"></div></div>
+    <div class="note" id="adSkinN">Press Refresh.</div></div>
+  <div class="card" style="margin-top:16px"><div class="row between"><h3>Changes Kodi Control made on the box</h3><button class="btn" id="unLoad">Check</button></div>
+    <p class="note" style="margin:0 0 10px">Everything this app installs or changes on the box, with a way back. Each tab also has its own Default button.</p>
+    <table class="t" id="unTable"><tr><td class="empty">Press Check.</td></tr></table></div>
+  <div class="card" style="margin-top:16px">
+    <div class="row" style="gap:10px;flex-wrap:wrap"><input id="adFind" placeholder="Search name or id" style="flex:1;min-width:180px">
+      <select id="adShow"><option value="running">Running now</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option><option value="all">All installed</option></select>
+      <select id="adType"><option value="">All types</option></select></div>
+    <div class="note" id="adCount" style="margin:8px 0">Press Refresh.</div>
+    <div style="max-height:600px;overflow:auto"><table class="t" id="adTable"></table></div></div>
+</section>
+
 <section class="page" id="logs">
   <div class="row between"><h1>Crash &amp; log summary</h1><button class="btn p" id="logLoad">Read logs</button></div>
   <p class="sub">Parses <span class="mono">kodi.log</span>, <span class="mono">kodi.old.log</span> and crash logs over SSH.</p>
@@ -451,7 +517,7 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
 
 <!-- THEMES -->
 <section class="page" id="themes">
-  <h1>App themes</h1><p class="sub">84 themes · modern, retro, futuristic, Apple, open source, Steam, community and Kodi skins. Hover a card for its reference.</p>
+  <h1>App themes</h1><p class="sub">84 themes · modern, retro, futuristic, Apple, open source, Steam, community and Kodi skins. Hover a card for its reference. <button class="btn" id="thDefault">Default theme</button></p>
   <div id="themegroups"></div>
 </section>
 
@@ -475,6 +541,15 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
 </section>
 
 <!-- CONNECTION -->
+<section class="page" id="ports">
+  <div class="row between"><h1>Ports</h1><button class="btn p" id="ptScan">Scan ports</button></div>
+  <p class="sub">Every port the box listens on, the program that owns it, and clashes with the ports Kodi and this app are set to use. Scans by itself when you open this page.</p>
+  <div class="warnbox" id="ptWarn" hidden></div>
+  <div class="card"><h3>Checks</h3><div class="report" id="ptIssues" style="margin-top:0"><div class="empty">Press Scan ports.</div></div></div>
+  <div class="card" style="margin-top:16px"><h3>Listening ports</h3>
+    <div style="max-height:560px;overflow:auto"><table class="t" id="ptTable"><tr><td class="empty">Press Scan ports.</td></tr></table></div></div>
+</section>
+
 <section class="page" id="conn">
   <h1>SSH connection</h1><p class="sub">The password is encrypted with Windows' data protection and stored only on this laptop.</p>
   <div class="card" style="max-width:640px">
@@ -502,15 +577,11 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
         <option value="helper">Kodi Control helper add-on (all stats in one request)</option></select></label>
       <label class="f">Helper port<input id="cHelperPort" value="8099"></label>
     </div>
-    <div class="row" style="margin-top:8px"><button class="btn" id="cHelperInstall">Install helper add-on</button><button class="btn" id="cHelperTest">Test speed</button><span class="note" id="cHelperNote" style="margin:0"></span></div>
+    <div class="row" style="margin-top:8px"><button class="btn" id="cHelperInstall">Install helper add-on</button><button class="btn" id="cHelperTest">Test speed</button><button class="btn" id="cHelperRemove" title="Remove the stats helper add-on from the box and go back to SSH">Remove helper</button><span class="note" id="cHelperNote" style="margin:0"></span></div>
     <div class="note">The helper is a small Kodi service that answers the dashboard over HTTP on your network. Only this app knows its random token. Any route falls back to SSH if it stops answering.</div>
     <div class="row" style="margin-top:14px"><button class="btn p" id="cConnect">Connect</button><button class="btn" id="cDisconnect">Disconnect</button><span id="cStatus"></span></div>
     <div class="report" id="cReport"></div>
   </div>
-  <div class="card" style="margin-top:16px"><div class="row between"><h3>Ports on the box</h3><button class="btn" id="ptScan">Scan ports</button></div>
-    <p class="note" style="margin:0 0 10px">Every port the box listens on, the program that owns it, and clashes with the ports Kodi and this app are set to use.</p>
-    <div class="report" id="ptIssues"></div>
-    <div style="max-height:460px;overflow:auto"><table class="t" id="ptTable"><tr><td class="empty">Press Scan ports.</td></tr></table></div></div>
 </section>
 
 </main></div>
@@ -534,6 +605,23 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
     <input id="kbText" autocomplete="off" style="width:100%">
     <div class="row" style="margin-top:10px"><button class="btn p" id="kbOk">Send &amp; OK</button><button class="btn" id="kbType">Send</button><button class="btn" id="kbCancel">Close Kodi's keyboard</button><button class="btn" id="kbHide">Hide</button></div>
     <div class="note">Enter sends and confirms. What you type goes straight into the keyboard on the TV.</div></div>
+</div>
+<div class="kbpop" id="kePop" role="dialog" aria-modal="true" aria-labelledby="keTitle" hidden>
+  <div class="card" style="width:min(640px,94vw)"><div class="row between"><h3 id="keTitle">Edit binding</h3><button class="btn" data-close="kePop" aria-label="Close">✕</button></div>
+    <div class="note" id="keNow" style="margin:0 0 10px"></div>
+    <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px">
+      <label class="f">Window<select id="keWin"></select></label>
+      <label class="f">Device<select id="keDev"><option>keyboard</option><option>remote</option><option>gamepad</option><option>mouse</option><option>joystick</option><option>appcommand</option></select></label>
+      <label class="f">Key / button<input id="keKey" list="kmKeys" placeholder="e.g. f1, red, 61513"></label>
+      <label class="f">Modifier<select id="keMod"><option value="">—</option><option>ctrl</option><option>shift</option><option>alt</option><option>ctrl,shift</option><option>ctrl,alt</option><option>super</option></select></label>
+      <label class="f">Category<select id="keCat"></select></label>
+      <label class="f">Action<select id="keAct"></select></label>
+    </div>
+    <label class="f" style="margin-top:10px">Or type any action or builtin<input id="keRaw" list="kmActs" placeholder="e.g. ActivateWindow(Home) or RunScript(script.kodicontrol,zoom)"></label>
+    <label class="row" style="gap:6px;margin-top:8px"><input type="checkbox" id="keLong"> Long press</label>
+    <div class="note" id="keSrc"></div>
+    <div class="row" style="margin-top:12px"><button class="btn p" id="keApply">Save &amp; apply on TV</button><button class="btn" id="keKeep">Add to my bindings</button><button class="btn" id="keNoop" title="Bind the key to noop so it does nothing in this window">Disable this key</button><button class="btn" data-close="kePop">Cancel</button></div>
+    <div class="note">Changes go into your bindings (kodicontrol.xml), which Kodi loads after gen.xml, so they win over the Keymap Editor add-on and Kodi's defaults.</div></div>
 </div>
 <script src="themes-ext.js"></script>
 <script src="renderer.js"></script>
