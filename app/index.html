@@ -296,13 +296,16 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
       <div class="tog"><span>Transparent OSD<div class="note">Clears the OSD backgrounds; the play button, progress bar and button row stay visible</div></span><div class="sw" data-o="osdClear"></div></div>
       <div style="padding:10px 0;border-bottom:1px solid var(--border)"><div class="row between"><span>Progress bar thickness</span><span class="mono" id="obv">stock</span></div><input type="range" min="0" max="20" step="1" value="0" id="ob"><div class="note">0 = skin default. Lower = thinner bar (pixels).</div></div>
       <div style="padding-top:10px"><div class="row between"><span>OSD buttons<div class="note">Untick to hide a button</div></span><button class="btn" id="obLoad">Load buttons</button></div><div class="chips" id="osdBtns" style="margin-top:8px"><span class="empty">Press Load buttons.</span></div></div>
-      <div class="row" style="margin-top:12px"><button class="btn p" id="osdApply">Apply OSD</button><button class="btn" id="osdHelper">Install helper only</button><button class="btn" id="osdDefault" title="Stock OSD: no zoom button, no borrowed OSD, no seek preview">Default OSD</button><span id="osdBusy"></span></div>
+      <div class="row" style="margin-top:12px"><button class="btn p" id="osdApply">Apply OSD</button><span class="row" style="gap:8px"><span class="note" id="osdHelperState" style="margin:0">Kodi Control helper (script.kodicontrol): –</span><div class="sw" id="osdHelperSw" role="switch" aria-label="Kodi Control helper add-on" title="Install / enable or disable the Kodi Control helper add-on (zoom button, seek preview)"></div></span><button class="btn" id="osdDefault" title="Stock OSD: no zoom button, no borrowed OSD, no seek preview">Default OSD</button><span id="osdBusy"></span></div>
       <div class="note">Applying also applies this skin's other tweaks from the Skin tweaks page, because both are built from the skin's original files.</div>
       <div class="report" id="osdReport"></div>
     </div>
   </div>
-  <div class="card" style="margin-top:16px"><div class="row between"><h3>Seek preview <span class="tag warn" title="ffmpeg decodes frames on the box in the background during playback, and reads extra data from the NAS or stream">heavy on the box</span></h3><div class="sw" data-o="seekPreview" role="switch" aria-label="Seek preview"></div></div>
-    <p class="note" style="margin:0 0 10px">Like Netflix or Prime Video: while you seek, a box above the progress bar shows the frame you are about to jump to, with its time. Seeking waits for the seek delay, so you can press several times and watch the preview before it jumps. Frames are made on the box by ffmpeg, cached, and fetched first around where you are watching. Works for files on the box or a USB drive, SMB and NFS shares (read through Kodi itself, so no share password is needed) and http streams.</p>
+  <div class="card" style="margin-top:16px"><div class="row between"><h3>Seek preview <span class="tag warn" title="ffmpeg decodes frames on the box in the background during playback, and reads extra data from the NAS or stream">heavy on the box</span></h3><div class="sw" id="skOn" role="switch" aria-label="Seek preview"></div></div>
+    <p class="note" style="margin:0 0 10px">Like Netflix or Prime Video: while you seek, a box above the progress bar shows the frame you are about to jump to, with its time. Seeking waits for the seek delay, so you can press several times and watch the preview before it jumps. Frames are made on the box by ffmpeg, cached, and fetched first around where you are watching. Works for files on the box or a USB drive, SMB and NFS shares (read through Kodi itself, so no share password is needed) and http streams. The switch works straight away, in every skin and from the OSD's own skip buttons too; switching it off puts every seek setting back to Kodi's defaults.</p>
+    <div class="row between" style="margin-bottom:10px"><span>ffmpeg on the box <span id="skFf" class="note">–</span></span><span class="row"><button class="btn" id="skCheck">Check</button><button class="btn" id="skInstall" style="display:none">Install FFmpeg Tools</button></span></div>
+    <div class="report" id="skReport"></div>
+    <div id="skOpts">
     <div class="grid g2" style="gap:16px">
       <div>
         <div class="tv" style="margin-bottom:8px"><div class="osd"><div class="seekdemo" id="skDemo"><i></i><b>01:12:40 / 02:05:00</b></div><div class="tl"><i style="width:58%"></i></div></div></div>
@@ -312,16 +315,15 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
         <label class="f" style="margin-top:8px">Frame colour<select id="skColor"><option value="FFFFFFFF">White</option><option value="FF000000">Black</option><option value="FF20A0FF">Blue</option><option value="FFE50914">Red</option><option value="00FFFFFF">No frame</option></select></label>
       </div>
       <div>
-        <div class="row between"><span>ffmpeg on the box</span><span id="skFf" class="note">–</span></div>
-        <div class="row" style="margin:6px 0 10px"><button class="btn" id="skCheck">Check</button><button class="btn" id="skInstall">Install FFmpeg Tools</button><button class="btn" id="skClear">Clear cached frames</button><button class="btn" id="skDefault" title="Service off, cached frames deleted, Kodi's seek delay and steps put back">Default seek settings</button><button class="btn" id="skRemove" style="display:none" title="Uninstall FFmpeg Tools from the box">Remove FFmpeg Tools</button></div>
         <label class="f" style="margin-bottom:8px">A frame every<select id="skStep"><option value="5">5 seconds</option><option value="10" selected>10 seconds</option><option value="15">15 seconds</option><option value="30">30 seconds</option></select></label>
         <div><div class="row between"><span>Seek delay</span><span class="mono" id="skDelayV">1000 ms</span></div><input type="range" min="250" max="3000" step="250" value="1000" id="skDelay" style="width:100%"><div class="note">How long Kodi waits after your last press before it jumps (Kodi's "Seek delay"). Longer = more time to look at the preview.</div></div>
         <label class="f" style="margin-top:8px">Seek steps (left / right)<select id="skSteps"><option value="-10,10">±10 s</option><option value="-30,-10,10,30">±10 s, 30 s</option><option value="-60,-30,-10,10,30,60">±10 s, 30 s, 1 min</option><option value="-300,-60,-30,-10,10,30,60,300" selected>±10 s, 30 s, 1 min, 5 min</option><option value="-600,-300,-60,-30,-10,10,30,60,300,600">±10 s … 10 min</option><option value="">Keep Kodi's setting</option></select></label>
         <div class="note">Pressing again within the delay moves to the next, bigger step, like holding a scrub button.</div>
+        <div class="tog" style="margin-top:8px"><span>Keep frames in RAM only<div class="note">Nothing written to the eMMC; frames are made again next time</div></span><div class="sw" id="skRam" role="switch" aria-label="Keep frames in RAM only"></div></div>
         <div class="row" style="margin-top:10px"><button class="btn p" id="skSave">Save seek settings</button><span class="note" id="skNote" style="margin:0"></span></div>
-        <div class="note">The box itself is added to the skin when you press Apply OSD above.</div>
+        <div class="note">Saving updates the box in every skin straight away.</div>
       </div>
-    </div></div>
+    </div></div></div>
   <div class="card" style="margin-top:16px"><h3>Top 20 skins</h3><p class="note" style="margin:0 0 10px">Installed skins can be used as the OSD source. Missing ones can be installed from the Kodi repository.</p><div class="skins" id="skins"></div></div>
 </section>
 
@@ -574,10 +576,11 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
       <label class="f">Fetch dashboard and JSON-RPC through<select id="cVia">
         <option value="">SSH tunnel (default: one open connection, nothing exposed)</option>
         <option value="web">Kodi web server, straight from this PC (needs "Allow remote control via HTTP")</option>
-        <option value="helper">Kodi Control helper add-on (all stats in one request)</option></select></label>
+        <option value="helper">Kodi Control stats helper, service.kodicontrol (all stats in one request)</option></select></label>
       <label class="f">Helper port<input id="cHelperPort" value="8099"></label>
     </div>
-    <div class="row" style="margin-top:8px"><button class="btn" id="cHelperInstall">Install helper add-on</button><button class="btn" id="cHelperTest">Test speed</button><button class="btn" id="cHelperRemove" title="Remove the stats helper add-on from the box and go back to SSH">Remove helper</button><span class="note" id="cHelperNote" style="margin:0"></span></div>
+    <div class="row" style="margin-top:8px"><span class="note" id="cHelperState" style="margin:0">Kodi Control stats helper (service.kodicontrol): –</span><div class="sw" id="cHelperSw" role="switch" aria-label="Kodi Control stats helper add-on" title="Install / enable or disable the stats helper add-on"></div><button class="btn" id="cHelperInstall" style="display:none">Install stats helper</button><button class="btn" id="cHelperTest">Test speed</button><button class="btn" id="cHelperRemove" style="display:none" title="Remove the stats helper add-on from the box and go back to SSH">Remove stats helper</button></div>
+    <div class="note" id="cHelperNote"></div>
     <div class="note">The helper is a small Kodi service that answers the dashboard over HTTP on your network. Only this app knows its random token. Any route falls back to SSH if it stops answering.</div>
     <div class="row" style="margin-top:14px"><button class="btn p" id="cConnect">Connect</button><button class="btn" id="cDisconnect">Disconnect</button><span id="cStatus"></span></div>
     <div class="report" id="cReport"></div>

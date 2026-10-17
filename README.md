@@ -23,6 +23,9 @@ A Windows desktop app for managing a Kodi box (CoreELEC, LibreELEC, OSMC or any 
   - A preview of the chosen source OSD, with its own icons, and the zoom button highlighted.
   - Editable zoom values.
   - Seek preview (Netflix/Prime style): a frame box above the progress bar while seeking. Needs the FFmpeg Tools add-on; marked **heavy**, because ffmpeg runs on the box during playback.
+    - One switch for all of Kodi: it is patched into every skin in your profile at once (built-in skins get it when you switch to them from Kodi Control). It works from the seek bar and from the OSD's own skip buttons, which are turned into step seeks.
+    - Switching it off takes it out of every skin and puts the seek delay, seek steps and frame cache back to Kodi's defaults. Its options show only while it is on.
+    - Optional RAM-only frame cache: nothing written to the eMMC.
 - **Keymaps.** An editor for every Kodi window, with key capture from a live "last key" view. Works with the Keymap Editor add-on.
   - Import every current keymap (including the add-on's gen.xml) into your bindings.
   - "What each key does now": every binding Kodi loads, its defaults included, with the file it comes from and the ones a later file overrides. Sort it, filter it by device, and edit any binding with every action the Keymap Editor offers.
@@ -48,7 +51,9 @@ A Windows desktop app for managing a Kodi box (CoreELEC, LibreELEC, OSMC or any 
   - Type text into Kodi (Ctrl+T).
 - **84 app themes.**
 - **Default / Undo everywhere.** Every tab has a Default button: Skin tweaks, OSD themes, zoom values, seek preview, Live view, Keymaps, Keymap Editor settings, Media artwork, IPTV settings, Themes and the stats helper.
-  - Add-ons → **Changes Kodi Control made on the box** lists everything the app installed or changed on the box, each with Remove or Put back.
+  - Add-ons → **Changes Kodi Control made on the box** lists everything the app installed or changed. Each item has an on/off switch where it can be switched (the helper, the stats helper, FFmpeg Tools, the seek preview, the frame cache, each skin's patched files), or a Remove / Put back button.
+  - Removing a repository add-on such as FFmpeg Tools keeps a copy inside Kodi Control, so switching it back on needs no download.
+  - The SSH and OSD pages show which helper add-on they mean, whether it is installed and enabled, and a switch for it.
   - Heavy features (seek preview, live video, "as fast as possible", key learning, FFmpeg Tools and System Tools installs) ask before they start.
 
 ## Install

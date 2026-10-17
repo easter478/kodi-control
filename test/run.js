@@ -408,6 +408,21 @@ const AEON = {
       'xml/Includes.xml': Buffer.from('<includes><include name="PlayerBar"><control type="progress"><left>312</left><top>969</top><width>1296</width><height>2</height></control></include></includes>') };
     const b = skin.applyAll(withBar, { seekPreview: true }, { dirs: ['xml'], res: [1920, 1080] }).changed['xml/DialogSeekBar.xml'];
     ok(/<left>114<\/left>/.test(b) && /<left>1410<\/left>/.test(b), 'slots should span the skin bar 312..1608');
+    // with the OSD open both windows are up: the seek bar's box steps aside so only one shows
+    ok(/!Window\.IsVisible\(videoosd\)/.test(b) && !/!Window\.IsVisible\(videoosd\)/.test(f.changed['xml/VideoOSD.xml']), 'seek bar box should hide while the OSD is open');
+  });
+  await test('seekPreview turns the OSD\'s instant skips into step seeks (so the preview shows from the OSD)', () => {
+    const files = { 'xml/VideoOSD.xml': Buffer.from('<window><controls><include>Skips</include></controls></window>'),
+      'xml/Includes_OSD.xml': Buffer.from('<includes><include name="Skips"><control type="button"><onclick>Seek(-10)</onclick></control><control type="button"><onclick>Seek(30)</onclick></control><control type="button"><onclick>Seek(600)</onclick></control><control type="button"><onclick>PlayerControl(SmallSkipBackward)</onclick></control></include></includes>'),
+      'xml/Home.xml': Buffer.from('<window><controls><control type="button"><onclick>Seek(10)</onclick></control></controls></window>') };
+    const f = skin.applyAll(files, { seekPreview: true }, { dirs: ['xml'], res: [1920, 1080] });
+    const inc = f.changed['xml/Includes_OSD.xml'];
+    ok(inc, 'include with the skip buttons not patched');
+    eq((inc.match(/Action\(StepBack\)/g) || []).length, 2); eq((inc.match(/Action\(StepForward\)/g) || []).length, 1);
+    ok(/Seek\(600\)/.test(inc), 'big jumps (over a minute) stay as they are');
+    ok(!f.changed['xml/Home.xml'], 'Home should not be touched');
+    ok(f.report.some(r => /now step-seek/.test(r.text)), 'report should say the skips were changed');
+    ok(!skin.applyAll(files, {}, { dirs: ['xml'], res: [1920, 1080] }).changed['xml/Includes_OSD.xml'], 'without the seek preview the skips stay');
   });
   await test('xbt: LZO1X frames decode (literal run + back reference)', async () => {
     const xbt = require('../app/xbt');

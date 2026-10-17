@@ -272,7 +272,9 @@ const SEEK_PY = String.raw`import os, re, json, time, shutil, hashlib, threading
 import xbmc, xbmcgui, xbmcvfs
 home = xbmcgui.Window(10000)
 CFG = xbmcvfs.translatePath('special://profile/addon_data/script.kodicontrol/seek.json')
-TMP = xbmcvfs.translatePath('special://temp/kcseek')
+DISK = xbmcvfs.translatePath('special://temp/kcseek')
+RAM = '/tmp/kcseek'
+TMP = DISK
 SLOTS = 40
 def conf():
     try:
@@ -385,8 +387,14 @@ while not mon.abortRequested():
     if now - cfgAt > 5: c, cfgAt = conf(), now
     on = c.get('on') and player.isPlayingVideo()
     if not on:
-        if gen: gen.stop = True; gen = None; cur = None; clear()
+        if gen:
+            gen.stop = True; gen = None; cur = None; clear()
+            if TMP == RAM: shutil.rmtree(RAM, True)
         mon.waitForAbort(1); continue
+    want = RAM if c.get('ram') else DISK
+    if want != TMP:
+        if gen: gen.stop = True; gen = None; cur = None; clear()
+        shutil.rmtree(TMP, True); TMP = want
     try: f = player.getPlayingFile()
     except Exception: f = ''
     if f != cur:
@@ -567,15 +575,26 @@ async function undoStatus() {
   const [delay, steps] = await Promise.all(['videoplayer.seekdelay', 'videoplayer.seeksteps'].map(s => rpc('Settings.GetSettingValue', { setting: s }).then(r => r.value).catch(() => null)));
   const orig = cfg.seekOrig || SEEK_DEFAULT;
   const files = (await sh(`[ -f ${q(KH + '/userdata/keymaps/kodicontrol.xml')} ] && echo km; ls ${q(KH + '/userdata/addon_data/pvr.iptvsimple')}/*.kcorig 2>/dev/null | head -1 | sed 's/^/iptv /'; du -sk ${q(KH + '/temp/kcseek')} 2>/dev/null | cut -f1 | sed 's/^/cache /'; true`)).split('\n');
+  const { skins, current } = await listSkins().catch(() => ({ skins: [], current: '' }));
+  const patched = await patchedSkins().catch(() => []);
   return {
-    addons: there.map(id => ({ id, ...APP_ADDONS[id], enabled: det[id].enabled, version: det[id].version, byApp: (cfg.installed || []).includes(id) })),
+    addons: ids.map(id => ({ id, ...APP_ADDONS[id], installed: there.includes(id), enabled: there.includes(id) ? det[id].enabled !== false : false, version: (det[id] || {}).version, byApp: (cfg.installed || []).includes(id), copy: fs.existsSync(addonCopy(id)) })),
+    skins: skins.filter(x => patched.includes(x.id) || hasTweaks(cfg.skins[x.id]) || (cfg.seek && cfg.seek.on && x.path.startsWith(KH))).map(x => ({ id: x.id, name: x.name, patched: patched.includes(x.id), active: x.id === current, tweaks: hasTweaks(cfg.skins[x.id]) })),
+    seekOn: !!(cfg.seek && cfg.seek.on), seekRam: !!(cfg.seek && cfg.seek.ram),
     seek: { delay, steps, orig, changed: delay != null && (delay !== orig.delay || JSON.stringify(steps) !== JSON.stringify(orig.steps)) },
     keymapFile: files.includes('km'), iptvOrig: files.some(l => l.startsWith('iptv ')), seekCacheKb: +((files.find(l => l.startsWith('cache ')) || '').slice(6)) || 0,
     addonToggles: Object.entries(cfg.addonOrig || {}).map(([id, was]) => ({ id, was })), artChanges: (cfg.artUndo || []).length,
   };
 }
+const addonCopy = id => path.join(app.getPath('userData'), 'addon-copies', id + '.tar');
 async function removeAddon(id) {
   if (!APP_ADDONS[id]) throw new Error('Kodi Control only removes the add-ons it installs');
+  // add-ons from a repository are kept on this PC first, so switching them back on needs no download
+  if (!['script.kodicontrol', 'service.kodicontrol'].includes(id)) {
+    const r = await exec(`tar -C ${q(KH + '/addons')} -cf - ${id}`, { timeout: 300000 });
+    if (r.code || r.out.length < 1024) throw new Error('Could not keep a copy of ' + id + ' on this PC, so it was not removed');
+    fs.mkdirSync(path.dirname(addonCopy(id)), { recursive: true }); fs.writeFileSync(addonCopy(id), r.out);
+  }
   await rpc('Addons.SetAddonEnabled', { addonid: id, enabled: false }).catch(() => {});
   await new Promise(r => setTimeout(r, 800));
   const extra = id === 'script.kodicontrol' ? ` ${q(KH + '/temp/kcseek')}` : '';
@@ -584,16 +603,97 @@ async function removeAddon(id) {
   cfg.installed = (cfg.installed || []).filter(x => x !== id);
   if (id === 'service.kodicontrol') { if (cfg.conn.via === 'helper') cfg.conn.via = ''; delete cfg.conn.helperToken; rpcMode = null; }
   saveCfg();
-  return `${APP_ADDONS[id].name} removed from the box`;
+  return `${APP_ADDONS[id].name} removed from the box${fs.existsSync(addonCopy(id)) ? ' (a copy is kept in Kodi Control, so switching it on puts it back without a download)' : ' (Kodi Control can put it back any time)'}`;
+}
+// the switch next to each add-on: enable / disable, or put it on the box from the app (or its repository) first
+async function setAppAddon({ id, enabled }) {
+  if (!APP_ADDONS[id]) throw new Error('Not a Kodi Control add-on');
+  const there = (await sh(`[ -d ${q(KH + '/addons/' + id)} ] && echo y; true`)).trim() === 'y';
+  if (there) {
+    await rpc('Addons.SetAddonEnabled', { addonid: id, enabled: !!enabled }, 15000);
+    return `${APP_ADDONS[id].name} ${enabled ? 'enabled' : 'disabled'}`;
+  }
+  if (!enabled) return `${APP_ADDONS[id].name} is not on the box`;
+  if (id === 'script.kodicontrol') return ensureHelper();
+  if (id === 'service.kodicontrol') return (await installStatsHelper({ port: cfg.conn.helperPort || 8099 })).note;
+  if (fs.existsSync(addonCopy(id))) {
+    await exec(`tar -C ${q(KH + '/addons')} -xf -`, { stdin: fs.readFileSync(addonCopy(id)), timeout: 300000 });
+    await builtin('UpdateLocalAddons').catch(() => {});
+    await new Promise(r => setTimeout(r, 2500));
+    await rpc('Addons.SetAddonEnabled', { addonid: id, enabled: true }, 15000).catch(() => {});
+    if (!(cfg.installed ||= []).includes(id)) cfg.installed.push(id); saveCfg();
+    return `${APP_ADDONS[id].name} put back from the copy kept in Kodi Control`;
+  }
+  await builtin(`InstallAddon(${id})`);
+  if (!(cfg.installed ||= []).includes(id)) cfg.installed.push(id); saveCfg();
+  return `Kodi is asking on the TV to install "${APP_ADDONS[id].name}". Confirm there.`;
+}
+async function setSkinPatched({ id, on }) {
+  const { current } = await listSkins();
+  const r = on ? await applySkin(id, cfg.skins[id] || {}, { reload: id === current }) : await revertSkin(id, { reload: id === current });
+  return r.report.map(x => x.text).join(' · ');
 }
 async function seekDefault() {
   const o = cfg.seekOrig || SEEK_DEFAULT;
-  await exec(`f=${q(KH + '/userdata/addon_data/script.kodicontrol/seek.json')}; [ -d "$(dirname "$f")" ] && printf '%s' '{"on": false}' > "$f"; rm -rf ${q(KH + '/temp/kcseek')}; true`);
+  await exec(`f=${q(KH + '/userdata/addon_data/script.kodicontrol/seek.json')}; [ -d "$(dirname "$f")" ] && printf '%s' '{"on": false}' > "$f"; rm -rf ${q(KH + '/temp/kcseek')} /tmp/kcseek; true`);
   await rpc('Settings.SetSettingValue', { setting: 'videoplayer.seekdelay', value: o.delay });
   await rpc('Settings.SetSettingValue', { setting: 'videoplayer.seeksteps', value: o.steps });
   if (cfg.seek) cfg.seek.on = false; saveCfg();
   return `Seek preview service off, cached frames deleted, seek delay ${o.delay} ms and steps ${o.steps.join(', ')} s put back`;
 }
+// ---------- seek preview: one Kodi-wide switch, patched into every skin installed in the profile ----------
+const SEEK_LOOK = { place: 'follow', size: 'medium', bottom: 230, color: 'FFFFFFFF' };
+const SEEK_KEYS = ['seekPreview', 'seekPlace', 'seekSize', 'seekBottom', 'seekColor'];
+// the same defaults as the Skin tweaks page: a skin whose saved settings all match these has nothing to patch
+const TWEAK_DEF = { busy: false, vol: false, topbar: false, hbTransparent: false, posters: false, fullArt: false, fullArtMode: '', fullArtColor: 'FF0B0B0F', radius: 12, speed: 100, anim: '', osdZoom: false, osdFrom: '', bgs: [], hbItems: [], menuId: 9000,
+  hbGradients: false, winAnimOff: false, winAnimFiles: [], winAnimVis: false, hideInfo: [], hideItems: [], glass: false, osdHide: [], osdBarH: 0, osdClear: false };
+const LOOK_ONLY = ['radius', 'menuId', 'fullArtColor', 'fullArtMode', 'zoomReplace', 'winAnimVis'];
+function hasTweaks(t = {}) {
+  return Object.entries(t).some(([k, v]) => {
+    if (SEEK_KEYS.includes(k) || LOOK_ONLY.includes(k) || v === undefined) return false;
+    if (!(k in TWEAK_DEF)) return !!v && !(Array.isArray(v) && !v.length);
+    return JSON.stringify(v) !== JSON.stringify(TWEAK_DEF[k]);
+  });
+}
+function seekT(t = {}) {
+  const s = cfg.seek || {}, l = { ...SEEK_LOOK, ...(s.look || {}) };
+  return { ...t, seekPreview: !!s.on, seekPlace: l.place, seekSize: l.size, seekBottom: +l.bottom || 230, seekColor: l.color };
+}
+const patchedMark = id => `${KH}/kodicontrol/patched-${id}`;
+async function patchedSkins() {
+  // marked when Kodi Control writes a skin; older patches are found by the files it adds
+  const out = await sh(`cd ${q(KH + '/addons')} 2>/dev/null && for d in skin.*; do if [ -f ${q(KH + '/kodicontrol')}/patched-$d ] || [ -s ${q(KH + '/kodicontrol')}/added-$d.txt ] || grep -qls 'kodicontrol' $d/*/*.xml 2>/dev/null; then echo $d; fi; done; true`);
+  return out.split('\n').map(x => x.trim()).filter(Boolean);
+}
+// put the switch's state into every profile skin; built-in (read-only) skins get it when you switch to them
+async function seekEverywhere() {
+  const { skins, current } = await listSkins();
+  const on = !!(cfg.seek && cfg.seek.on), patched = await patchedSkins(), lines = [];
+  for (const s of skins) {
+    const t = cfg.skins[s.id] || {}, mine = s.path.startsWith(KH), reload = s.id === current;
+    try {
+      if (on && mine) { const r = await applySkin(s.id, t, { reload }); lines.push({ ok: !r.report.some(x => !x.ok && /Seek preview/.test(x.text)), text: `${s.name}: ${(r.report.find(x => /Seek preview/.test(x.text)) || { text: 'patched' }).text.replace(/^Seek preview: /, '')}` }); }
+      else if (on && !mine) lines.push({ ok: true, text: `${s.name} is built into Kodi: it gets the seek preview when you switch to it from Kodi Control` });
+      else if (!on && patched.includes(s.id)) {
+        if (hasTweaks(t)) await applySkin(s.id, t, { reload }); else await revertSkin(s.id, { reload });
+        lines.push({ ok: true, text: `${s.name}: seek preview taken out${hasTweaks(t) ? ' (your other tweaks stay)' : ', original skin files back'}` });
+      }
+    } catch (e) { lines.push({ ok: false, text: `${s.name}: ${e.message}` }); }
+  }
+  return lines;
+}
+async function seekEnable({ on, step, width, delay, steps, look, ram }) {
+  if (!on) {
+    const msg = await seekDefault();
+    cfg.seek = { on: false }; saveCfg();
+    const lines = await seekEverywhere();
+    return { report: [{ ok: true, text: msg }, ...lines] };
+  }
+  const notes = await handlers['seek:save']({ on: true, step, width, delay, steps, ram });
+  cfg.seek.look = { ...SEEK_LOOK, ...(look || {}) }; saveCfg();
+  return { report: [{ ok: true, text: 'Seek preview on: ' + notes }, ...(await seekEverywhere())] };
+}
+
 async function keymapDefault() {
   await exec(`rm -f ${q(KH + '/userdata/keymaps/kodicontrol.xml')}`);
   cfg.keymaps = []; saveCfg();
@@ -1202,7 +1302,8 @@ async function readMenu(id, skinPath) {
   return xml.includes('<shortcut>') ? xml : '';
 }
 
-async function applySkin(id, t) {
+async function applySkin(id, t, { reload = true } = {}) {
+  t = seekT(t);
   const p = await prepareSkin(id);
   const files = await pristine(p);
   const res = p.s.res.find(r => r.def) || p.s.res[0];
@@ -1268,6 +1369,8 @@ async function applySkin(id, t) {
   } else await restoreMenu(id);
 
   if (t.osdZoom || t.seekPreview) report.push({ ok: true, text: await ensureHelper() });
+  await exec(`mkdir -p ${q(KH + '/kodicontrol')} && touch ${q(patchedMark(id))}`);
+  if (!reload) return { report };
   const via = await builtin('ReloadSkin()').catch(e => 'failed: ' + e.message);
   report.push({ ok: !via.startsWith('failed'), text: via.startsWith('failed') ? `Skin reload ${via}` : `Skin reloaded (${via})` });
   return { report };
@@ -1276,14 +1379,15 @@ async function restoreMenu(id) {
   const origMenu = `${ORIG()}/${id}-mainmenu.DATA.xml`, user = `${MENU_DIR()}/${id}-mainmenu.DATA.xml`;
   await exec(`if [ -f ${q(origMenu + '.none')} ]; then rm -f ${q(user)} ${q(origMenu)} ${q(origMenu + '.none')}; rm -f ${q(MENU_DIR())}/*.hash; elif [ -f ${q(origMenu)} ]; then cp ${q(origMenu)} ${q(user)} && rm -f ${q(origMenu)} ${q(MENU_DIR())}/*.hash; fi; true`);
 }
-async function revertSkin(id) {
+async function revertSkin(id, { reload = true } = {}) {
   const s = await skinInfo(id);
   const orig = (await sh(`ls ${q(ORIG())}/${id}-*.tar 2>/dev/null | grep -v -- '-colors\\.tar$' | head -1`)).trim();
   if (!orig) return { report: [{ ok: true, text: 'Nothing to revert: Kodi Control has not changed this skin' }] };
   const colors = orig.replace(/\.tar$/, '-colors.tar');
   const manifest = `${KH}/kodicontrol/added-${id}.txt`;
-  await exec(`cd ${q(s.path)} && { [ -f ${q(manifest)} ] && while IFS= read -r f; do [ -n "$f" ] && rm -f "./$f"; done < ${q(manifest)}; true; } && tar -xf ${q(orig)} && { [ -f ${q(colors)} ] && tar -xf ${q(colors)}; true; } && rm -f ${q(manifest)}`, { timeout: 60000 });
+  await exec(`cd ${q(s.path)} && { [ -f ${q(manifest)} ] && while IFS= read -r f; do [ -n "$f" ] && rm -f "./$f"; done < ${q(manifest)}; true; } && tar -xf ${q(orig)} && { [ -f ${q(colors)} ] && tar -xf ${q(colors)}; true; } && rm -f ${q(manifest)} ${q(patchedMark(id))}`, { timeout: 60000 });
   await restoreMenu(id);
+  if (!reload) return { report: [{ ok: true, text: 'Skin restored to its original files' }] };
   const via = await builtin('ReloadSkin()').catch(e => 'failed: ' + e.message);
   return { report: [{ ok: true, text: 'Skin restored to its original files' }, { ok: !via.startsWith('failed'), text: via.startsWith('failed') ? `Skin reload ${via}` : `Skin reloaded (${via})` }] };
 }
@@ -1373,7 +1477,10 @@ const handlers = {
   'backup:restore': f => restore(f),
   'backup:reveal': f => shell.showItemInFolder(f),
   'skins:list': listSkins,
-  'skins:switch': async id => { await rpc('Settings.SetSettingValue', { setting: 'lookandfeel.skin', value: id }); return true; },
+  'skins:switch': async id => {
+    if (cfg.seek && cfg.seek.on) { const pt = await patchedSkins(); if (!pt.includes(id)) await applySkin(id, cfg.skins[id] || {}, { reload: false }).catch(() => {}); }
+    await rpc('Settings.SetSettingValue', { setting: 'lookandfeel.skin', value: id }); return true;
+  },
   'skins:install': async id => builtin(`InstallAddon(${id})`),
   'skin:save': ({ id, t }) => { cfg.skins[id] = t; saveCfg(); return true; },
   'skin:apply': ({ id, t }) => { cfg.skins[id] = t; saveCfg(); return applySkin(id, t); },
@@ -1474,7 +1581,7 @@ const handlers = {
     const conf = (await sh(`cat ${q(KH + '/userdata/addon_data/script.kodicontrol/seek.json')} 2>/dev/null`)).trim();
     const [delay, steps] = await Promise.all(['videoplayer.seekdelay', 'videoplayer.seeksteps'].map(s => rpc('Settings.GetSettingValue', { setting: s }).then(r => r.value).catch(() => null)));
     let c = {}; try { c = JSON.parse(conf); } catch {}
-    return { ffmpeg: ff, conf: c, delay, steps, cached: (await sh(`du -sk ${q(KH + '/temp/kcseek')} 2>/dev/null | cut -f1`)).trim() };
+    return { ffmpeg: ff, conf: c, delay, steps, on: !!(cfg.seek && cfg.seek.on), look: { ...SEEK_LOOK, ...((cfg.seek || {}).look || {}) }, ram: !!c.ram, cached: (await sh(`du -sk ${q(KH + '/temp/kcseek')} /tmp/kcseek 2>/dev/null | awk '{s+=$1} END {print s+0}'`)).trim() };
   },
   'seek:installFfmpeg': async () => {
     if (!ssh) throw new Error('Not connected');
@@ -1482,23 +1589,29 @@ const handlers = {
     if (!(cfg.installed ||= []).includes('tools.ffmpeg-tools')) { cfg.installed.push('tools.ffmpeg-tools'); saveCfg(); }
     return 'Kodi is asking on the TV to install "FFmpeg Tools" from the CoreELEC repository. Confirm there, then press Check again.';
   },
-  'seek:save': async ({ on, step, width, delay, steps }) => {
+  'seek:save': async ({ on, step, width, delay, steps, ram, look }) => {
     if (!ssh) throw new Error('Not connected');
-    const c = { on: !!on, step: Math.max(2, Math.min(60, +step || 10)), width: Math.max(160, Math.min(640, +width || 384)) };
+    const c = { on: !!on, step: Math.max(2, Math.min(60, +step || 10)), width: Math.max(160, Math.min(640, +width || 384)), ram: ram === undefined ? !!(cfg.seek && cfg.seek.ram) : !!ram };
     if (!cfg.seekOrig) {
       const [d0, s0] = await Promise.all(['videoplayer.seekdelay', 'videoplayer.seeksteps'].map(k => rpc('Settings.GetSettingValue', { setting: k }).then(r => r.value).catch(() => null)));
       if (d0 != null) cfg.seekOrig = { delay: d0, steps: s0 || SEEK_DEFAULT.steps };
     }
-    cfg.seek = { ...c, delay, steps }; saveCfg();
+    cfg.seek = { ...(cfg.seek || {}), ...c, delay, steps }; if (look) cfg.seek.look = { ...SEEK_LOOK, ...look }; saveCfg();
     await exec(`mkdir -p ${q(KH + '/userdata/addon_data/script.kodicontrol')} && cat > ${q(KH + '/userdata/addon_data/script.kodicontrol/seek.json')}`, { stdin: JSON.stringify(c) });
     const notes = [await ensureHelper()];
     if (delay != null) { await rpc('Settings.SetSettingValue', { setting: 'videoplayer.seekdelay', value: Math.max(0, Math.min(3000, Math.round(+delay / 250) * 250)) }); notes.push(`seek delay ${delay} ms`); }
     if (Array.isArray(steps) && steps.length) { await rpc('Settings.SetSettingValue', { setting: 'videoplayer.seeksteps', value: steps.map(Number) }); notes.push(`seek steps ${steps.join(', ')} s`); }
     return notes.join(' · ');
   },
-  'seek:clearCache': async () => { await exec(`rm -rf ${q(KH + '/temp/kcseek')}`); return true; },
+  'seek:enable': a => { if (!ssh) throw new Error('Not connected'); return seekEnable(a || {}); },
+  'seek:apply': async a => { if (!ssh) throw new Error('Not connected'); const notes = await handlers['seek:save']({ ...a, on: true }); return { report: [{ ok: true, text: notes }, ...(await seekEverywhere())] }; },
+  'seek:clearCache': async () => { await exec(`rm -rf ${q(KH + '/temp/kcseek')} /tmp/kcseek`); return true; },
   'undo:status': () => { if (!ssh) throw new Error('Not connected'); return undoStatus(); },
   'addons:remove': id => { if (!ssh) throw new Error('Not connected'); return removeAddon(id); },
+  'addons:setApp': a => { if (!ssh) throw new Error('Not connected'); return setAppAddon(a); },
+  'addons:appState': async id => { if (!ssh) throw new Error('Not connected'); const u = await undoStatus(); return u.addons.find(a => a.id === id); },
+  'skin:setPatched': a => { if (!ssh) throw new Error('Not connected'); return setSkinPatched(a); },
+  'seek:ram': async ram => { if (!ssh) throw new Error('Not connected'); cfg.seek = { ...(cfg.seek || {}), ram: !!ram }; saveCfg(); await exec(`f=${q(KH + '/userdata/addon_data/script.kodicontrol/seek.json')}; [ -f "$f" ] && python3 -c 'import json,sys;p=sys.argv[1];c=json.load(open(p));c["ram"]=sys.argv[2]=="1";json.dump(c,open(p,"w"))' "$f" ${ram ? 1 : 0}; ${ram ? `rm -rf ${q(KH + '/temp/kcseek')}` : 'rm -rf /tmp/kcseek'}; true`); return ram ? 'Seek frames are now kept in RAM only and deleted when playback stops. Nothing is written to the eMMC.' : 'Seek frames are cached on the eMMC again (the last 3 videos).'; },
   'seek:default': () => { if (!ssh) throw new Error('Not connected'); return seekDefault(); },
   'keymap:default': () => { if (!ssh) throw new Error('Not connected'); return keymapDefault(); },
   'addons:undo': () => { if (!ssh) throw new Error('Not connected'); return addonsUndo(); },

@@ -60,7 +60,8 @@ function show(id) {
   if (id === 'preview') pvVidStart(); else if (PVV && PVV.on) pvVidStop();
   if (id === 'preview') { pvLoop(); if (S.connected) kbCheck(); }
   if (id === 'osd' && S.connected && !THUMB) osdThumbLoad();
-  if (id === 'osd' && S.connected) skCheck();
+  if (id === 'osd' && S.connected) { skCheck(); osdHelperState(); }
+  if (id === 'conn' && S.connected) cHelperState();
   if (id === 'keymaps' && S.connected && !KM.loaded) kmLoad();
   if (id === 'keymaps') kwStart(); else kwStop();
   if (id === 'files' && S.connected && !FP.dir) fpOpen(FP.home || '');
@@ -1226,14 +1227,17 @@ $('osdApply').onclick = e => needConn() && tid && act(e.currentTarget, async () 
   if (T.osdZoom && T.zoomReplace === undefined) { await osdThumbLoad(); if (T.zoomReplace === undefined) { $('zoomRep').focus(); throw new Error('Pick which OSD button should become the zoom preset first'); } }
   $('osdReport').innerHTML = '<div class="note">Patching skin files over SSH…</div>';
   report($('osdReport'), (await call('skin:apply', { id: tid, t: T })).report);
-  // the service follows the switch: on when the box is in the skin, off otherwise
-  try { await call('seek:save', skValues()); } catch {}
 });
 // ---------- seek preview ----------
 // look of the box is per skin (T), the frame step / seek delay / steps are Kodi-wide (seek:save)
+// the seek preview is Kodi-wide (every skin), so its look lives with the seek settings, not with the skin
+let SK = { on: false, look: { place: 'follow', size: 'medium', bottom: 230, color: 'FFFFFFFF' } };
 function skLoadT() {
-  $('skPlace').value = T.seekPlace || 'follow'; $('skSize').value = T.seekSize || 'medium';
-  $('skBot').value = T.seekBottom || 230; $('skColor').value = T.seekColor || 'FFFFFFFF'; skDemo();
+  const l = SK.look;
+  $('skPlace').value = l.place || 'follow'; $('skSize').value = l.size || 'medium';
+  $('skBot').value = l.bottom || 230; $('skColor').value = l.color || 'FFFFFFFF'; skDemo();
+  $('skOn').classList.toggle('on', !!SK.on); $('skRam').classList.toggle('on', !!SK.ram);
+  $('skOpts').style.display = SK.on ? '' : 'none';
 }
 function skDemo() {
   $('skBotV').textContent = $('skBot').value + ' px';
@@ -1242,15 +1246,16 @@ function skDemo() {
   d.style.bottom = `calc(100% + ${Math.round((+$('skBot').value - 80) / 12)}px)`;
   d.style.setProperty('--sk', $('skColor').value === '00FFFFFF' ? 'transparent' : '#' + $('skColor').value.slice(2));
 }
-[['skPlace', 'seekPlace'], ['skSize', 'seekSize'], ['skBot', 'seekBottom'], ['skColor', 'seekColor']].forEach(([id, k]) => $(id).oninput = $(id).onchange = () => { T[k] = id === 'skBot' ? +$(id).value : $(id).value; save(); skDemo(); });
+['skPlace', 'skSize', 'skBot', 'skColor'].forEach(id => $(id).oninput = $(id).onchange = () => skDemo());
 $('skDelay').oninput = () => { $('skDelayV').textContent = $('skDelay').value + ' ms'; };
-const skValues = () => ({ on: !!T.seekPreview, step: +$('skStep').value, width: { small: 288, medium: 384, large: 512 }[$('skSize').value] || 384, delay: +$('skDelay').value, steps: $('skSteps').value ? $('skSteps').value.split(',').map(Number) : null });
+const skValues = () => ({ on: $('skOn').classList.contains('on'), look: { place: $('skPlace').value, size: $('skSize').value, bottom: +$('skBot').value, color: $('skColor').value }, ram: $('skRam').classList.contains('on'), step: +$('skStep').value, width: { small: 288, medium: 384, large: 512 }[$('skSize').value] || 384, delay: +$('skDelay').value, steps: $('skSteps').value ? $('skSteps').value.split(',').map(Number) : null });
 async function skCheck(btn) {
   if (!S.connected) return;
   const go = async () => {
     const s = await call('seek:status');
     $('skFf').innerHTML = s.ffmpeg ? `<span class="tag ok">found</span> <span class="mono">${esc(s.ffmpeg)}</span>` : '<span class="tag warn">not installed</span>';
     $('skInstall').style.display = s.ffmpeg ? 'none' : '';
+    SK = { on: s.on, look: s.look, ram: s.ram }; skLoadT();
     if (s.conf.step) $('skStep').value = s.conf.step;
     if (s.delay != null) { $('skDelay').value = s.delay; $('skDelayV').textContent = s.delay + ' ms'; }
     if (Array.isArray(s.steps)) { const v = s.steps.join(','); if (![...$('skSteps').options].some(o => o.value === v)) $('skSteps').insertAdjacentHTML('afterbegin', `<option value="${v}">Now: ${esc(s.steps.join(', '))} s</option>`); $('skSteps').value = v; }
@@ -1260,9 +1265,24 @@ async function skCheck(btn) {
 }
 $('skCheck').onclick = e => needConn() && skCheck(e.currentTarget);
 $('skInstall').onclick = e => needConn() && act(e.currentTarget, async () => toast(await call('seek:installFfmpeg')));
-$('skClear').onclick = e => needConn() && act(e.currentTarget, async () => { await call('seek:clearCache'); toast('Cached frames deleted'); skCheck(); });
-$('skSave').onclick = e => needConn() && act(e.currentTarget, async () => { toast(await call('seek:save', skValues())); skCheck(); });
-$('osdHelper').onclick = e => needConn() && act(e.currentTarget, async () => toast(await call('helper:install')));
+$('skSave').onclick = e => needConn() && act(e.currentTarget, async () => {
+  $('skReport').innerHTML = '<div class="note">Updating every skin…</div>';
+  report($('skReport'), (await call('seek:apply', skValues())).report); skCheck();
+});
+// the switch is the whole feature: on = patched into every skin + service on; off = everything back to Kodi's defaults
+$('skOn').onclick = () => {
+  if (!needConn()) return;
+  const on = !$('skOn').classList.contains('on');
+  if (on && !heavyOk('seek', 'Seek preview runs ffmpeg on the box in the background while you watch, to make the preview frames, and reads extra data from the NAS or stream. Expect more box CPU and network during playback.')) return;
+  $('skOn').classList.toggle('on', on); $('skOpts').style.display = on ? '' : 'none';
+  act(null, async () => {
+    $('skReport').innerHTML = `<div class="note">${on ? 'Turning the seek preview on in every skin…' : 'Turning the seek preview off and putting every seek setting back…'}</div>`;
+    try { report($('skReport'), (await call('seek:enable', { ...skValues(), on })).report); }
+    catch (err) { $('skReport').innerHTML = ''; throw err; }
+    finally { skCheck(); }
+  });
+};
+$('skRam').onclick = () => needConn() && act(null, async () => { const on = $('skRam').classList.toggle('on'); toast(await call('seek:ram', on)); });
 // zoom values: shown as the amount added (0.20 = Kodi zoom 1.2), edited here and baked into the helper add-on
 let ZV = [0, 0.2, 0.35];
 const zName = v => v === 0 ? '0' : (+v).toFixed(2);
@@ -1430,14 +1450,12 @@ guard('pvVidOn', 'video', 'The live video layer copies the TV picture from the b
 guard('skInstall', 'ffmpeg', 'This installs the FFmpeg Tools add-on (about 65 MB) on the box from the CoreELEC repository. Kodi asks you to confirm on the TV.');
 guard('ifInstall', 'iftop', 'This installs the System Tools add-on on the box from the CoreELEC repository. Kodi asks you to confirm on the TV.');
 guard('kmLearn', 'debuglog', 'Learning a key switches Kodi debug logging on for a few seconds, which writes extra to the eMMC.');
-{ const sp = document.querySelector('#osd .sw[data-o="seekPreview"]'), o = sp.onclick;
-  sp.onclick = e => { if (!sp.classList.contains('on') && !heavyOk('seek', 'Seek preview runs ffmpeg on the box in the background while you watch, to make the preview frames, and reads extra data from the NAS or stream. Expect more box CPU and network during playback.')) return; o.call(sp, e); }; }
 { const r = $('pvRate'), o = r.onchange; let last = r.value;
   r.onchange = e => { if (r.value === '0' && !heavyOk('fast', '"As fast as possible" asks Kodi for a screenshot again as soon as the last one arrives. That keeps the box busy.')) { r.value = last; return; } last = r.value; o.call(r, e); }; }
 
 // skin tweaks and OSD are built from the same skin files, so each Default resets its own part and re-applies the rest
-const OSD_ACTIVE = ['osdZoom', 'osdFrom', 'osdClear', 'osdBarH', 'osdHide', 'seekPreview'];
-const OSD_KEYS = [...OSD_ACTIVE, 'zoomReplace', 'seekPlace', 'seekSize', 'seekBottom', 'seekColor'];
+const OSD_ACTIVE = ['osdZoom', 'osdFrom', 'osdClear', 'osdBarH', 'osdHide'];
+const OSD_KEYS = [...OSD_ACTIVE, 'zoomReplace', 'seekPreview', 'seekPlace', 'seekSize', 'seekBottom', 'seekColor'];
 const tweakOn = k => { const v = T[k], d = DEF[k]; if (v === undefined) return false; if (d === undefined) return !!v && !(Array.isArray(v) && !v.length); return JSON.stringify(v) !== JSON.stringify(d); };
 async function resetPart(keys, rest, el) {
   for (const k of keys) { if (k in DEF) T[k] = JSON.parse(JSON.stringify(DEF[k])); else delete T[k]; }
@@ -1452,22 +1470,12 @@ $('skinDefault').onclick = e => needConn() && tid && act(e.currentTarget, async 
   await resetPart(keys, OSD_ACTIVE, $('skinReport'));
 });
 $('osdDefault').onclick = e => needConn() && tid && act(e.currentTarget, async () => {
-  if (!confirm('Put this skin\'s stock OSD back: no zoom button, no borrowed OSD, normal bar and buttons, seek preview off? Skin tweaks from the Skin tweaks page are kept.')) return;
+  if (!confirm('Put this skin\'s stock OSD back: no zoom button, no borrowed OSD, normal bar and buttons? Skin tweaks from the Skin tweaks page are kept. The seek preview has its own switch below.')) return;
   $('osdReport').innerHTML = '<div class="note">Putting the OSD back…</div>';
   const rest = Object.keys(DEF).filter(k => !OSD_KEYS.includes(k));
   await resetPart(OSD_KEYS, rest, $('osdReport'));
-  try { $('osdReport').insertAdjacentHTML('beforeend', `<div><span class="tag ok">ok</span><span>${esc(await call('seek:default'))}</span></div>`); } catch {}
 });
 $('zReset').onclick = e => act(e.currentTarget, async () => { ZV = [0, 0.2, 0.35]; zRender(); if (S.connected) { toast(await call('zoom:save', ZV)); ZV = await call('zoom:get'); zRender(); } });
-$('skDefault').onclick = e => needConn() && act(e.currentTarget, async () => {
-  if (!confirm('Turn the seek preview service off, delete its cached frames and put Kodi\'s seek delay and seek steps back to how they were?')) return;
-  toast(await call('seek:default')); skCheck();
-});
-$('skRemove').onclick = e => needConn() && act(e.currentTarget, async () => {
-  if (!confirm('Remove FFmpeg Tools from the box? The seek preview stops making frames until you install it again.')) return;
-  toast(await call('addons:remove', 'tools.ffmpeg-tools')); skCheck();
-});
-{ const o = skCheck; skCheck = async btn => { await o(btn); try { $('skRemove').style.display = /tools\.ffmpeg-tools/.test($('skFf').textContent) ? '' : 'none'; } catch {} }; }
 $('pvDefault').onclick = () => {
   if (!$('pvLive').classList.contains('on')) $('pvLive').click();
   if ($('pvVidOn').classList.contains('on')) $('pvVidOn').click();
@@ -1499,23 +1507,86 @@ $('cHelperRemove').onclick = e => needConn() && act(e.currentTarget, async () =>
   toast(await call('addons:remove', 'service.kodicontrol'));
   if ($('cVia').value === 'helper') { $('cVia').value = ''; $('cVia').onchange(); }
 });
-// one list of everything the app changed on the box
+// one list of everything the app changed on the box: a switch where a thing can be turned on and off,
+// a button where it can only be put back or deleted
+const swHtml = (on, attrs, label) => `<div class="sw${on ? ' on' : ''}" role="switch" aria-checked="${on}" aria-label="${esc(label)}" ${attrs}></div>`;
+const addonText = a => !a.installed ? `Not on the box${a.copy ? ' · copy kept in Kodi Control' : ''}` : a.enabled ? 'Installed, enabled' : 'Installed, disabled';
 async function unLoad(btn) {
   if (!S.connected) return;
   const go = async () => {
     const u = await call('undo:status'), rows = [];
-    for (const a of u.addons) rows.push([`${esc(a.name)} <span class="note mono">${esc(a.id)} ${esc(a.version || '')}</span>${a.heavy ? ` <span class="tag warn" title="${esc(a.heavy)}">heavy</span>` : ''}`, `Installed${a.enabled === false ? ', disabled' : ''} · ${esc(a.why)}`, `<button class="btn" data-unrm="${esc(a.id)}">Remove</button>`]);
-    if (u.seek.changed) rows.push(['Kodi seek delay and steps', `Now ${u.seek.delay} ms, ${(u.seek.steps || []).join(', ')} s · was ${u.seek.orig.delay} ms, ${u.seek.orig.steps.join(', ')} s`, '<button class="btn" data-un="seek:default">Put back</button>']);
-    if (u.seekCacheKb) rows.push(['Seek preview frame cache', fmtBytes(u.seekCacheKb * 1024) + ' in Kodi\'s temp folder', '<button class="btn" data-un="seek:clearCache">Delete</button>']);
+    for (const a of u.addons) {
+      if (!a.installed && !a.copy && !a.byApp && a.id === 'virtual.system-tools') continue;
+      rows.push([`${esc(a.name)} <span class="note mono">${esc(a.id)} ${esc(a.version || '')}</span>${a.heavy ? ` <span class="tag warn" title="${esc(a.heavy)}">heavy</span>` : ''}`,
+        `${addonText(a)} · ${esc(a.why)}`,
+        `${swHtml(a.installed && a.enabled, `data-unsw="${esc(a.id)}"`, a.name)}${a.installed ? `<button class="btn" data-unrm="${esc(a.id)}">Remove</button>` : ''}`]);
+    }
+    rows.push(['Seek preview', u.seekOn ? 'On in every skin' : 'Off · Kodi\'s own seek settings', swHtml(u.seekOn, 'data-unseek', 'Seek preview')]);
+    if (u.seek.changed && !u.seekOn) rows.push(['Kodi seek delay and steps', `Now ${u.seek.delay} ms, ${(u.seek.steps || []).join(', ')} s · was ${u.seek.orig.delay} ms, ${u.seek.orig.steps.join(', ')} s`, '<button class="btn" data-un="seek:default">Put back</button>']);
+    rows.push(['Seek preview frame cache', `${u.seekRam ? 'RAM only, nothing on the eMMC' : 'Kept on the eMMC (last 3 videos)'}${u.seekCacheKb ? ' · ' + fmtBytes(u.seekCacheKb * 1024) + ' now' : ''}<br><span class="note">Switch on = keep frames on the eMMC; off = RAM only</span>`,
+      `${swHtml(!u.seekRam, 'data-unram', 'Keep seek frames on the eMMC')}${u.seekCacheKb ? '<button class="btn" data-un="seek:clearCache">Delete</button>' : ''}`]);
+    for (const k of u.skins) rows.push([`Skin files: ${esc(k.name)}${k.active ? ' <span class="tag cur">active</span>' : ''}`,
+      `${k.patched ? 'Patched by Kodi Control' : 'Original files'}${k.tweaks ? ' · tweaks saved here' : ''}<br><span class="note">Switch off = the skin's original files (your tweak settings stay saved here); on = patched again</span>`,
+      swHtml(k.patched, `data-unskin="${esc(k.id)}"`, 'Skin files ' + k.name)]);
     if (u.keymapFile) rows.push(['Keymap file kodicontrol.xml', 'Bindings made in Keymaps', '<button class="btn" data-un="keymap:default">Delete</button>']);
     if (u.addonToggles.length) rows.push(['Add-on switches', u.addonToggles.map(t => `${esc(t.id)} was ${t.was ? 'on' : 'off'}`).join(', '), '<button class="btn" data-un="addons:undo">Undo</button>']);
     if (u.artChanges) rows.push(['Library artwork', `${u.artChanges} change${u.artChanges === 1 ? '' : 's'} from Media`, '<button class="btn" data-un="art:undo">Undo</button>']);
     if (u.iptvOrig) rows.push(['IPTV Simple settings', 'Original saved before the first change', '<button class="btn" data-un="iptv:undo">Restore</button>']);
-    rows.push(['Skin and OSD files', 'Patched skins go back with Default on Skin tweaks and OSD themes, or Revert to original', '']);
-    $('unTable').innerHTML = rows.map(r => `<tr><td>${r[0]}</td><td class="note">${r[1]}</td><td style="text-align:right;white-space:nowrap">${r[2]}</td></tr>`).join('');
-    $$('[data-unrm]').forEach(b => b.onclick = ev => act(ev.currentTarget, async () => { if (!confirm(`Remove ${b.dataset.unrm} from the box?`)) return; toast(await call('addons:remove', b.dataset.unrm)); if (b.dataset.unrm === 'service.kodicontrol' && $('cVia').value === 'helper') { $('cVia').value = ''; $('cVia').onchange(); } unLoad(); }));
+    $('unTable').innerHTML = rows.map(r => `<tr><td>${r[0]}</td><td class="note">${r[1]}</td><td style="text-align:right;white-space:nowrap"><span class="row" style="justify-content:flex-end;gap:8px">${r[2]}</span></td></tr>`).join('');
+    const busy = (el, fn) => { if (el.dataset.busy) return; el.dataset.busy = 1; el.style.opacity = .5; act(null, fn).finally(() => { delete el.dataset.busy; el.style.opacity = ''; unLoad(); }); };
+    $$('[data-unsw]').forEach(el => el.onclick = () => {
+      const id = el.dataset.unsw, a = u.addons.find(x => x.id === id), on = !el.classList.contains('on');
+      if (on && !a.installed && !a.copy && !['script.kodicontrol', 'service.kodicontrol'].includes(id) && !heavyOk('inst-' + id, `This installs ${a.name} on the box from its repository. Kodi asks you to confirm on the TV.`)) return;
+      if (on && a.heavy && !heavyOk('on-' + id, `${a.name}: ${a.heavy}.`)) return;
+      if (!on && id === 'script.kodicontrol' && !confirm('With the helper disabled, the zoom preset button and the seek preview stop working until you switch it back on. Disable it?')) return;
+      busy(el, async () => { toast(await call('addons:setApp', { id, enabled: on })); if (id === 'service.kodicontrol') cHelperState(); if (id === 'script.kodicontrol') osdHelperState(); });
+    });
+    $$('[data-unrm]').forEach(b => b.onclick = ev => act(ev.currentTarget, async () => {
+      const id = b.dataset.unrm, a = u.addons.find(x => x.id === id);
+      if (!confirm(`Remove ${a.name} from the box?${['script.kodicontrol', 'service.kodicontrol'].includes(id) ? ' Kodi Control can put it back any time.' : ' A copy is kept in Kodi Control first, so switching it on again needs no download.'}`)) return;
+      toast(await call('addons:remove', id));
+      if (id === 'service.kodicontrol' && $('cVia').value === 'helper') { $('cVia').value = ''; $('cVia').onchange(); }
+      unLoad(); cHelperState(); osdHelperState();
+    }));
+    $$('[data-unseek]').forEach(el => el.onclick = () => { show('osd'); $('skOn').scrollIntoView({ block: 'center' }); $('skOn').click(); });
+    $$('[data-unram]').forEach(el => el.onclick = () => busy(el, async () => { toast(await call('seek:ram', el.classList.contains('on'))); }));
+    $$('[data-unskin]').forEach(el => el.onclick = () => {
+      const on = !el.classList.contains('on');
+      if (!on && !confirm('Put this skin\'s original files back? Your tweak settings stay saved in Kodi Control, so switching it on patches them in again.')) return;
+      busy(el, async () => toast(await call('skin:setPatched', { id: el.dataset.unskin, on })));
+    });
     $$('[data-un]').forEach(b => b.onclick = ev => act(ev.currentTarget, async () => { if (!confirm('Put this back?')) return; const r = await call(b.dataset.un); toast(typeof r === 'string' ? r : 'Done'); unLoad(); }));
   };
   return btn ? act(btn, go) : go().catch(e => { $('unTable').innerHTML = `<tr><td class="empty">${esc(e.message)}</td></tr>`; });
 }
 $('unLoad').onclick = e => needConn() && unLoad(e.currentTarget);
+
+// helper add-ons: say which one, and whether it is installed and enabled, with one switch to change that
+async function helperSwitch(id, stateEl, swEl, extra) {
+  if (!S.connected) { stateEl.textContent = stateEl.dataset.label + ': not connected'; return; }
+  try {
+    const a = await call('addons:appState', id);
+    stateEl.textContent = `${stateEl.dataset.label}: ${addonText(a).toLowerCase()}`;
+    swEl.classList.toggle('on', !!(a.installed && a.enabled)); swEl.setAttribute('aria-checked', !!(a.installed && a.enabled));
+    if (extra) extra(a);
+    return a;
+  } catch (e) { stateEl.textContent = stateEl.dataset.label + ': ' + e.message; }
+}
+$('cHelperState').dataset.label = 'Kodi Control stats helper (service.kodicontrol)';
+$('osdHelperState').dataset.label = 'Kodi Control helper (script.kodicontrol)';
+const cHelperState = () => helperSwitch('service.kodicontrol', $('cHelperState'), $('cHelperSw'), a => { $('cHelperInstall').style.display = a.installed ? 'none' : ''; $('cHelperRemove').style.display = a.installed ? '' : 'none'; });
+const osdHelperState = () => helperSwitch('script.kodicontrol', $('osdHelperState'), $('osdHelperSw'));
+$('cHelperSw').onclick = () => needConn() && act(null, async () => {
+  const on = !$('cHelperSw').classList.contains('on');
+  if (on) { const a = await call('addons:appState', 'service.kodicontrol'); if (!a.installed) return $('cHelperInstall').click(); }
+  toast(await call('addons:setApp', { id: 'service.kodicontrol', enabled: on }));
+  if (!on && $('cVia').value === 'helper') { $('cVia').value = ''; $('cVia').onchange(); }
+  cHelperState();
+});
+$('osdHelperSw').onclick = () => needConn() && act(null, async () => {
+  const on = !$('osdHelperSw').classList.contains('on');
+  if (!on && !confirm('With the helper disabled, the zoom preset button and the seek preview stop working until you switch it back on. Disable it?')) return;
+  toast(await call('addons:setApp', { id: 'script.kodicontrol', enabled: on })); osdHelperState();
+});
+{ const o = $('cHelperInstall').onclick; $('cHelperInstall').onclick = e => { const p = o && o.call($('cHelperInstall'), e); Promise.resolve(p).finally(() => setTimeout(cHelperState, 500)); }; }
+{ const o = $('cHelperRemove').onclick; $('cHelperRemove').onclick = e => { const p = o && o.call($('cHelperRemove'), e); Promise.resolve(p).finally(() => setTimeout(cHelperState, 500)); }; }

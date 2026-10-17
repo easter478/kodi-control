@@ -1065,13 +1065,13 @@ function bgControls(b, cond, w, h) {
 // Window(Home).Property(kodicontrol.seekthumb) at it; kodicontrol.seekslot (0..SEEK_SLOTS) says how far along
 // the bar the target is, so the box can follow it. Plain textures (no border=, masked like the posters).
 const SEEK_SLOTS = 40;
-function seekPreviewBlock(t, W, H, font, bar) {
+function seekPreviewBlock(t, W, H, font, bar, only = '') {
   const w = { small: 288, medium: 384, large: 512 }[t.seekSize] || 384, h = Math.round(w * 9 / 16), pad = 6;
   const bw = w + pad * 2, top = Math.max(0, H - (+t.seekBottom || 230) - h - pad * 2 - 44);
   const P = 'Window(Home).Property(kodicontrol.seek';
   const box = (left, vis) => `<control type="group"><!-- kodicontrol: seek preview -->
     <left>${left}</left><top>${top}</top><width>${bw}</width><height>${h + pad * 2 + 44}</height>
-    <visible>!String.IsEmpty(${P}thumb))${vis ? ' + ' + vis : ''}</visible>
+    <visible>!String.IsEmpty(${P}thumb))${vis ? ' + ' + vis : ''}${only ? ' + ' + only : ''}</visible>
     <control type="image"><left>0</left><top>0</top><width>${bw}</width><height>${h + pad * 2}</height><texture colordiffuse="${t.seekColor || 'FFFFFFFF'}" diffuse="${MASK_WIDE}">${WHITE}</texture></control>
     <control type="image"><left>${pad}</left><top>${pad}</top><width>${w}</width><height>${h}</height><aspectratio>scale</aspectratio><texture diffuse="${MASK_WIDE}">$INFO[${P}thumb)]</texture></control>
     <control type="label"><left>0</left><top>${h + pad * 2 + 4}</top><width>${bw}</width><height>40</height><align>center</align><aligny>center</aligny><font>${font}</font><textcolor>FFFFFFFF</textcolor><shadowcolor>FF000000</shadowcolor><label>$INFO[Player.SeekTime]$INFO[Player.Duration, / ]</label></control>
@@ -1103,22 +1103,44 @@ function seekBarOf(out, d, k, W) {
   };
   return look(out[k] || '', 0);
 }
+// OSD skip buttons that jump at once (Seek(10), small skips) never put Kodi in its "seeking" state, so no preview
+// could show. They become Kodi's step seek instead, which waits for the seek delay like the remote's left/right.
+const SEEK_JUMP = /\bSeek\(\s*([-+]?\d+)\s*\)|\bPlayerControl\(\s*Small(?:Skip|Step)(Forward|Backward|Back)\s*\)/gi;
+function stepSeeks(x) {
+  let n = 0;
+  const y = x.replace(SEEK_JUMP, (m, secs, dir) => {
+    if (secs !== undefined) { const v = +secs; if (!v || Math.abs(v) > 60) return m; n++; return v > 0 ? 'Action(StepForward)' : 'Action(StepBack)'; }
+    n++; return /^f/i.test(dir) ? 'Action(StepForward)' : 'Action(StepBack)';
+  });
+  return { x: y, n };
+}
 function addSeekPreview(out, dirs, t, W, H, fontOf) {
   const files = [];
+  let steps = 0;
   for (const d of dirs) {
-    const sb = Object.keys(out).find(f => dirOf(f) === d && /^DialogSeekBar\.xml$/i.test(base(f)));
-    const bar = sb ? seekBarOf(out, d, sb, W) : null;
-    for (const name of ['DialogSeekBar.xml', 'VideoOSD.xml']) {
-      let k = Object.keys(out).find(f => dirOf(f) === d && base(f).toLowerCase() === name.toLowerCase());
-      if (!k && name === 'DialogSeekBar.xml') { k = `${d}/${name}`; out[k] = '<?xml version="1.0" encoding="UTF-8"?>\n<window>\n\t<controls>\n\t</controls>\n</window>\n'; }
-      if (!k || /kodicontrol: seek preview/.test(out[k])) continue;
-      const end = out[k].lastIndexOf('</controls>');
-      if (end < 0) continue;
-      out[k] = out[k].slice(0, end) + seekPreviewBlock(t, W, H, fontOf(d), bar || seekBarOf(out, d, k, W)) + '\n\t' + out[k].slice(end);
-      files.push(name);
+    const find = name => Object.keys(out).find(f => dirOf(f) === d && base(f).toLowerCase() === name.toLowerCase());
+    // the OSD's own buttons, in the window and in every include file it may use
+    for (const f of Object.keys(out)) {
+      if (dirOf(f) !== d || !isXml(f) || /^(Home|MyVideoNav|MyMusicNav|Settings[^/]*)\.xml$/i.test(base(f))) continue;
+      const r = stepSeeks(out[f]);
+      if (r.n) { out[f] = r.x; steps += r.n; }
     }
+    let sb = find('DialogSeekBar.xml');
+    if (!sb) { sb = `${d}/DialogSeekBar.xml`; out[sb] = '<?xml version="1.0" encoding="UTF-8"?>\n<window>\n\t<controls>\n\t</controls>\n</window>\n'; }
+    const osd = find('VideoOSD.xml');
+    const sbBar = seekBarOf(out, d, sb, W), osdBar = osd ? seekBarOf(out, d, osd, W) : null;
+    // with the OSD open both windows are up: the box then lines up with the OSD's own bar, and shows once
+    const put = (k, bar, only) => {
+      if (!k || /kodicontrol: seek preview/.test(out[k])) return false;
+      const end = out[k].lastIndexOf('</controls>');
+      if (end < 0) return false;
+      out[k] = out[k].slice(0, end) + seekPreviewBlock(t, W, H, fontOf(d), bar, only) + '\n\t' + out[k].slice(end);
+      files.push(base(k)); return true;
+    };
+    const inOsd = put(osd, osdBar || sbBar, '');
+    put(sb, sbBar || osdBar, inOsd ? '!Window.IsVisible(videoosd)' : '');
   }
-  return { n: files.length, files: [...new Set(files)] };
+  return { n: files.length, files: [...new Set(files)], steps };
 }
 
 function injectBackground(x, block) {
@@ -1249,7 +1271,7 @@ function applyAll(files, t, opts = {}) {
   }
   if (t.seekPreview) {
     const r = addSeekPreview(out, dirs, t, W, H, fontOf);
-    add(r.n > 0, r.n ? `Seek preview: frame box added to ${r.files.join(', ')}` : 'Seek preview: no OSD or seek bar window found');
+    add(r.n > 0, r.n ? `Seek preview: frame box added to ${r.files.join(', ')}${r.steps ? ` · ${r.steps} OSD skip button${r.steps === 1 ? '' : 's'} now step-seek, so the preview shows from the OSD too` : ''}` : 'Seek preview: no OSD or seek bar window found');
   }
   if (t.bgs && t.bgs.length) {
     for (const b of t.bgs) {
