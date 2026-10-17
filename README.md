@@ -1,0 +1,97 @@
+# Kodi Control
+
+A Windows desktop app for managing a Kodi box (CoreELEC, LibreELEC, OSMC or any Linux Kodi) over SSH: a live dashboard, skin tweaks, OSD transplants between skins, keymaps, logs, IPTV playlists and full backups.
+
+## Features
+
+- **Dashboard.** Shows:
+  - Resolution, temperature, CPU, memory, IP address and Kodi version.
+  - Live network speed, storage, load average, Kodi's own memory and CPU use, and library counts.
+  - What's playing, with its poster, and the full player process info.
+- **Streaming from.** Shows which host Kodi is streaming from, labelled by debrid service (Real-Debrid, AllDebrid, Premiumize and others). Uses iftop for per-host speeds, or the whole-box rate without it.
+- **Skin tweaks.** Work with any skin, saved per skin:
+  - Rounded posters and episode thumbnails.
+  - Full-screen artwork, or artwork across the top only with a solid band behind the posters.
+  - Transparent home bar, no top bar, faster or no animations.
+  - Hide the busy spinner, the volume bar or individual info items.
+  - Custom backgrounds.
+- **OSD.**
+  - Move the whole video OSD from another installed skin, with its fonts, colours, strings and icons. Tested across Aeon Nox SiLVO, Bald, Cupertino, Nimbus, Onyx, Umbrestuary and Estuary.
+  - Hide individual OSD buttons, which are shown by name.
+  - Add a zoom button.
+- **Keymaps.** An editor for every Kodi window, with key capture from a live "last key" view. Works with the Keymap Editor add-on.
+- **Live view.** A near-live screenshot of the TV, plus a remote control.
+- **Media & IPTV.**
+  - Posters from a USB drive.
+  - Download M3U playlists, send them from the PC, or browse the box for them.
+  - Back up playlists and set up PVR IPTV Simple.
+- **Logs.** Crash summaries and grouped errors with likely causes.
+- **Backup & restore.** Each of these is a separate option:
+  - Skin settings, installed skins and repositories.
+  - Thumbnails, keymaps, add-on settings, and Kodi settings and library.
+  - Network shares and saved passwords, plus add-on logins and tokens.
+  - CoreELEC settings, Wi-Fi networks and Bluetooth pairings.
+- **84 app themes.**
+
+## Install
+
+### Option 1: download the app
+
+1. Download `KodiControl.exe` from the [Releases](../../releases) page.
+2. Run it. It's a portable app with nothing to install. Windows SmartScreen may warn about an unknown publisher. Choose **More info → Run anyway**.
+
+### Option 2: build from source
+
+You need [Node.js](https://nodejs.org) 20 or newer, and Git.
+
+```bash
+git clone https://github.com/easter478/kodi-control.git
+cd kodi-control
+npm install
+npm run app      # run it straight from source
+npm run dist     # build release/KodiControl.exe
+npm test         # offline tests (needs Git Bash on Windows)
+```
+
+## Set up the Kodi box
+
+1. **Turn on SSH.**
+   - CoreELEC / LibreELEC: *Settings → CoreELEC (or LibreELEC) → Services → SSH*. The default user is `root`. Set your own password.
+   - OSMC and other Linux: install and enable `openssh-server`.
+2. **Turn on JSON-RPC in Kodi.** Go to *Settings → Services → Control*. Turn on **"Allow remote control from applications on this system"**, which is the TCP API on port 9090.
+   - Optionally also turn on **"Allow remote control via HTTP"** (the web server on port 8080), with a user name and password.
+3. Note the box's IP address. It's under *Settings → System information → Network*.
+
+## Use
+
+1. Open **Connection**. Enter the box's IP, SSH port (22), user (`root`) and password or key file, then press **Connect**. Passwords are encrypted with Windows' own protection (DPAPI) and stay on this PC.
+2. The **Dashboard** fills in straight away and refreshes every few seconds.
+3. To change how the dashboard fetches its data, use **Connection → Dashboard data**:
+   - **SSH tunnel** (default): one open connection, with nothing exposed on the network.
+   - **Kodi web server**: straight from the PC. Needs the HTTP option above.
+   - **Helper add-on**: press **Install helper add-on**. A small Kodi service answers the whole dashboard in one request. It's protected by a random token that only this app knows.
+4. **Skin tweaks.**
+   1. Pick a skin and turn on the tweaks you want.
+   2. Press **Apply**. The first Apply keeps a pristine copy of the skin on the box, so **Revert** always gets you back.
+   3. Kodi reloads the skin.
+5. **OSD.**
+   1. Choose *OSD source* to borrow another installed skin's OSD.
+   2. Press **Load buttons** to tick off buttons you don't want.
+   3. Press **Apply**.
+6. **Backup.**
+   1. Tick what to save, then press **Back up now**. Archives go to `D:\KodiBackups`, or *Documents\KodiBackups* if there's no D: drive. You can change this.
+   2. To restore, press **Restore** on any archive. Kodi stops, the files go back, and Kodi starts again. Restored Wi-Fi, Bluetooth and CoreELEC settings take effect after a reboot.
+   3. Backups with passwords and tokens are plain files, so keep that folder private.
+
+### Testing against your box
+
+`"Kodi Control.exe" --selftest result.json` connects with the saved connection and runs every read-only feature, then writes pass/fail results to `result.json`.
+
+## Notes
+
+- Every change to the box goes over SSH, and every skin patch is undone by **Revert**.
+- The OSD transplant copies icons out of the source skin's `Textures.xbt`, unpacking them to PNG.
+
+## License
+
+ISC

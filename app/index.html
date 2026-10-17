@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kodi Control</title>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&family=Orbitron:wght@500;700&family=VT323&family=Press+Start+2P&family=Playfair+Display:wght@600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F5F3FF;--surface:#FFFFFF;--surface2:#EBEFF9;--fg:#1E1B4B;--muted:#475569;--border:#E0E7FF;
+  --primary:#6366F1;--on-primary:#fff;--accent:#059669;--danger:#DC2626;--warn:#D97706;
+  --radius:14px;--shadow:0 4px 18px rgba(49,46,129,.08);--font:'Fira Sans',sans-serif;--mono:'Fira Code',monospace;
+  --head:'Fira Sans',sans-serif;--glow:none;--sp1:8px;--sp2:12px;--sp3:16px;--sp4:24px;
+}
+[data-theme=midnight]{--bg:#0B1020;--surface:rgba(255,255,255,.06);--surface2:rgba(255,255,255,.1);--fg:#E6E9F5;--muted:#94A3B8;--border:rgba(255,255,255,.12);--primary:#818CF8;--on-primary:#0B1020;--accent:#34D399;--shadow:0 8px 30px rgba(0,0,0,.4)}
+[data-theme=nord]{--bg:#2E3440;--surface:#3B4252;--surface2:#434C5E;--fg:#ECEFF4;--muted:#AEB7C7;--border:#4C566A;--primary:#88C0D0;--on-primary:#2E3440;--accent:#A3BE8C;--danger:#BF616A;--warn:#EBCB8B}
+[data-theme=paper]{--bg:#FAFAF7;--surface:#fff;--surface2:#F1F0EA;--fg:#1C1C1C;--muted:#5B5B5B;--border:#E3E1D8;--primary:#111;--on-primary:#fff;--accent:#0F766E;--radius:6px;--shadow:none}
+[data-theme=synthwave]{--bg:#1A0B2E;--surface:#2A1046;--surface2:#3A1660;--fg:#FCE7F3;--muted:#D8B4FE;--border:#6D28D9;--primary:#F472B6;--on-primary:#1A0B2E;--accent:#22D3EE;--warn:#FBBF24;--glow:0 0 14px rgba(244,114,182,.55);--head:'Orbitron',sans-serif}
+[data-theme=amber]{--bg:#0D0800;--surface:#160E02;--surface2:#221604;--fg:#FFB000;--muted:#C98A00;--border:#5A3D00;--primary:#FFB000;--on-primary:#0D0800;--accent:#FFD27A;--danger:#FF5A1F;--warn:#FFD27A;--radius:0;--font:'VT323',monospace;--mono:'VT323',monospace;--head:'VT323',monospace;--glow:0 0 8px rgba(255,176,0,.45);--shadow:none}
+[data-theme=pixel]{--bg:#1D2B53;--surface:#29366F;--surface2:#3B5DC9;--fg:#F4F4F4;--muted:#C2C3C7;--border:#000;--primary:#FFEC27;--on-primary:#000;--accent:#00E436;--danger:#FF004D;--warn:#FFA300;--radius:0;--head:'Press Start 2P',monospace;--shadow:4px 4px 0 #000}
+[data-theme=film]{--bg:#2B2118;--surface:#3A2D21;--surface2:#4A3A2B;--fg:#F3E9D2;--muted:#CDBB9A;--border:#6B5640;--primary:#E3A857;--on-primary:#2B2118;--accent:#9DBF9E;--head:'Playfair Display',serif;--radius:4px}
+[data-theme=y2k]{--bg:linear-gradient(135deg,#DDE6F3,#F6E3F7);--surface:rgba(255,255,255,.7);--surface2:#E7ECF7;--fg:#1B1F3B;--muted:#4B5577;--border:#B9C4E0;--primary:#3B82F6;--on-primary:#fff;--accent:#D946EF;--radius:22px;--shadow:inset 0 1px 0 #fff,0 6px 20px rgba(59,130,246,.18)}
+[data-theme=cyberpunk]{--bg:#05050A;--surface:#0E0E18;--surface2:#16162A;--fg:#F0F0F0;--muted:#9CA3AF;--border:#FCEE0A;--primary:#FCEE0A;--on-primary:#05050A;--accent:#00F0FF;--danger:#FF003C;--radius:0;--glow:0 0 10px rgba(0,240,255,.5);--head:'Orbitron',sans-serif}
+[data-theme=hud]{--bg:#020B12;--surface:rgba(0,180,255,.05);--surface2:rgba(0,180,255,.1);--fg:#CFF6FF;--muted:#6FB7CC;--border:rgba(0,200,255,.35);--primary:#00D4FF;--on-primary:#020B12;--accent:#7CFFB2;--warn:#FFB547;--radius:2px;--glow:0 0 12px rgba(0,212,255,.35);--head:'Orbitron',sans-serif;--font:'Fira Code',monospace}
+[data-theme=aurora]{--bg:radial-gradient(1200px 600px at 10% 0%,#1B3B5A,#0A0F1E 60%);--surface:rgba(255,255,255,.07);--surface2:rgba(255,255,255,.12);--fg:#EAF6FF;--muted:#A5B8D0;--border:rgba(160,255,230,.25);--primary:#5EEAD4;--on-primary:#06221F;--accent:#C084FC;--radius:18px;--glow:0 0 18px rgba(94,234,212,.3)}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--font);min-height:100vh;background-attachment:fixed}
+[data-theme=amber] body,[data-theme=amber]{font-size:19px}
+.app{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+nav{border-right:1px solid var(--border);padding:var(--sp3);display:flex;flex-direction:column;gap:4px;background:var(--surface)}
+.brand{font:700 18px var(--head);padding:8px 10px 18px;color:var(--primary);text-shadow:var(--glow);display:flex;gap:8px;align-items:center}
+[data-theme=pixel] .brand{font-size:12px}
+nav button{all:unset;cursor:pointer;padding:9px 12px;border-radius:calc(var(--radius) - 4px);display:flex;gap:10px;align-items:center;color:var(--muted)}
+nav button:hover{background:var(--surface2);color:var(--fg)}
+nav button.on{background:var(--primary);color:var(--on-primary);box-shadow:var(--glow)}
+nav button:focus-visible,.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.conn{margin-top:auto;font:12px var(--mono);color:var(--muted);padding:10px;border:1px dashed var(--border);border-radius:var(--radius)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+main{padding:var(--sp4);overflow:auto}
+h1{font:600 24px var(--head);margin-bottom:4px;text-shadow:var(--glow)}
+[data-theme=pixel] h1{font-size:16px;line-height:1.8}
+.sub{color:var(--muted);margin-bottom:var(--sp4)}
+h3{font:600 14px var(--head);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:10px}
+[data-theme=pixel] h3{font-size:9px}
+.grid{display:grid;gap:var(--sp3);grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.g2{grid-template-columns:repeat(auto-fit,minmax(360px,1fr))}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--sp3);box-shadow:var(--shadow);backdrop-filter:blur(12px)}
+.kpi{font:600 26px var(--mono);color:var(--fg)}
+.kpi small{font-size:13px;color:var(--muted)}
+.label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.bar{height:8px;background:var(--surface2);border-radius:9px;overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;background:var(--primary);box-shadow:var(--glow)}
+.btn{all:unset;cursor:pointer;padding:8px 14px;border-radius:calc(var(--radius) - 4px);background:var(--surface2);border:1px solid var(--border);font-weight:500;font-size:14px;display:inline-flex;gap:6px;align-items:center;transition:.2s}
+.btn:hover{border-color:var(--primary)}
+.btn.p{background:var(--primary);color:var(--on-primary);border-color:transparent;box-shadow:var(--glow)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.between{justify-content:space-between}
+.tog{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
+.tog:last-child{border:0}
+.sw{width:42px;height:24px;border-radius:20px;background:var(--surface2);border:1px solid var(--border);position:relative;cursor:pointer;flex:none}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--muted);transition:.2s}
+.sw.on{background:var(--primary)}.sw.on::after{left:20px;background:var(--on-primary)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:8px 6px;border-bottom:1px solid var(--border);text-align:left}
+th{color:var(--muted);font-weight:500;font-size:12px;text-transform:uppercase}
+.mono{font-family:var(--mono)}
+.tag{font:500 11px var(--mono);padding:2px 8px;border-radius:20px;border:1px solid var(--border)}
+.tag.err{color:var(--danger);border-color:var(--danger)}.tag.warn{color:var(--warn);border-color:var(--warn)}.tag.ok{color:var(--accent);border-color:var(--accent)}
+.page{display:none}.page.on{display:block}
+.tv{aspect-ratio:16/9;border-radius:var(--radius);background:linear-gradient(160deg,#20304a,#0b0f18);position:relative;overflow:hidden;border:1px solid var(--border)}
+.homebar{position:absolute;left:0;right:0;bottom:22%;display:flex;justify-content:center;gap:28px;padding:12px;font:600 15px 'Fira Sans';color:#fff}
+.homebar.solid{background:rgba(10,14,22,.85)}
+.homebar span.f{color:#7dd3fc;text-shadow:0 0 10px #7dd3fc}
+.topbar{position:absolute;top:0;left:0;right:0;height:26px;background:rgba(0,0,0,.5);font:11px 'Fira Code';color:#ccc;display:flex;justify-content:space-between;padding:5px 12px}
+.posters{position:absolute;top:22%;left:6%;display:flex;gap:10px}
+.posters b{width:58px;height:86px;background:linear-gradient(#475569,#1e293b);border:1px solid #64748b}
+.anim-dot{position:absolute;width:14px;height:14px;border-radius:50%;background:#F472B6;box-shadow:0 0 0 4px rgba(244,114,182,.3);cursor:help}
+.osd{position:absolute;left:5%;right:5%;bottom:7%;padding:10px 14px;border-radius:10px;background:rgba(0,0,0,.6);color:#fff;font:12px 'Fira Sans'}
+.osd .tl{height:4px;background:#334155;border-radius:4px;margin:6px 0}.osd .tl i{display:block;width:42%;height:100%;background:#38bdf8;border-radius:4px}
+.zoom{display:flex;gap:6px}
+.zoom .btn{padding:5px 10px;font:500 12px var(--mono)}
+.themes{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}
+.th .ref{opacity:.7;font-size:10px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.th{cursor:pointer;border-radius:12px;overflow:hidden;border:2px solid var(--border);background:var(--surface)}
+.th.on{border-color:var(--primary);box-shadow:var(--glow)}
+.th .sw3{display:flex;height:54px}.th .sw3 i{flex:1}
+.th div.n{padding:8px 10px;font-size:13px;font-weight:600}.th div.n small{display:block;font-weight:400;color:var(--muted);font-size:11px}
+input[type=range]{width:100%;accent-color:var(--primary)}
+input,select{font:14px var(--mono);background:var(--surface2);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:8px 10px}
+.skins{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+.skin{padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);cursor:pointer;font-size:13px}
+.skin:hover,.skin.on{border-color:var(--primary)}
+.skin small{display:block;color:var(--muted);font-size:11px}
+.note{font-size:12px;color:var(--muted);margin-top:8px}
+svg.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+@media (max-width:800px){.app{grid-template-columns:1fr}nav{flex-direction:row;overflow:auto}.conn,.brand{display:none}main{padding:16px}.g2{grid-template-columns:1fr}}
+
+.app{height:100vh;min-height:0}main{height:100vh}
+.dot.off{background:var(--danger);box-shadow:0 0 8px var(--danger)}
+.btn[disabled]{opacity:.5;pointer-events:none}
+.btn.danger{color:var(--danger);border-color:var(--danger)}
+.toast{position:fixed;right:20px;bottom:20px;max-width:440px;padding:12px 16px;border-radius:var(--radius);background:var(--surface2);border:1px solid var(--border);box-shadow:var(--shadow);z-index:99;backdrop-filter:blur(14px);opacity:0;transform:translateY(10px);transition:.25s;pointer-events:none;white-space:pre-wrap}
+.toast.on{opacity:1;transform:none}.toast.err{border-color:var(--danger);color:var(--danger)}
+.report{margin-top:12px;display:flex;flex-direction:column;gap:6px;font-size:13px}
+.report div{display:flex;gap:8px;align-items:flex-start}
+.empty{color:var(--muted);font-size:13px;padding:12px 0}
+pre.con{background:#000;color:#9fef00;border-radius:8px;padding:12px;font:13px/1.45 'Fira Code',monospace;min-height:260px;max-height:420px;overflow:auto;white-space:pre-wrap;word-break:break-all}
+pre.log{background:var(--surface2);border-radius:8px;padding:12px;font:12px/1.45 var(--mono);max-height:420px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin-top:10px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+label.f input,label.f select{width:100%;color:var(--fg)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:flex;gap:6px;align-items:center;padding:6px 10px;border:1px solid var(--border);border-radius:20px;font-size:13px;cursor:pointer;background:var(--surface2)}
+.chip.on{border-color:var(--primary);color:var(--primary)}
+.chip input{display:none}
+.scroll{max-height:360px;overflow:auto}
+.ppi{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+.ppi h4{margin:0 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.ppi td{padding:4px 6px;font-size:13px}
+.ppi td.mono{word-break:break-all}
+.poster{width:80px;height:118px;border-radius:8px;background:linear-gradient(#64748b,#1e293b) center/cover;flex:none}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.skin .row{margin-top:6px;gap:6px}.skin .btn{padding:3px 8px;font-size:12px}
+.pv{position:relative;background:#000;border-radius:12px;overflow:hidden;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center}
+.pv img{width:100%;height:100%;object-fit:contain;display:block}
+.pv .empty{position:absolute;color:#94a3b8;text-align:center;padding:20px}
+.remote{display:grid;grid-template-columns:repeat(3,56px);gap:8px;justify-content:center}
+.remote .btn{height:48px;min-width:56px;justify-content:center;padding:0}
+.remote .ok{border-radius:50%;background:var(--primary);color:var(--on-primary);border-color:transparent}
+.km td{padding:4px}.km input,.km select{width:100%;min-width:0}
+.km td:nth-child(5){text-align:center}
+.kw{display:flex;gap:16px;align-items:center;margin-top:6px}
+.kwKey{min-width:96px;padding:14px 18px;border-radius:12px;background:var(--surface2);border:1px solid var(--border);font:600 22px/1.1 var(--mono, monospace);text-align:center}
+.kwKey.flash{border-color:var(--primary);box-shadow:0 0 0 2px var(--primary)}
+#fpTable tr[data-d]{cursor:pointer}
+table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;border-bottom:1px solid var(--border);text-align:left;font-size:13px}
+.tag.cur{background:var(--primary);color:var(--on-primary);border-color:transparent}
+</style>
+</head>
+<body>
+<div class="app">
+<nav id="nav">
+  <div class="brand"><svg class="i" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 22h8M12 18v4"/></svg>Kodi Control</div>
+</nav>
+<main>
+
+<!-- DASHBOARD -->
+<section class="page on" id="dashboard">
+  <h1>Dashboard</h1><p class="sub" id="dSub">Not connected. Set up the SSH connection first.</p>
+  <div class="grid">
+    <div class="card"><div class="label">Resolution</div><div class="kpi" id="dRes">–</div><div class="note" id="dResN">&nbsp;</div></div>
+    <div class="card"><div class="label">Device temperature</div><div class="kpi" id="dTemp">–</div><div class="bar"><i id="dTempB" style="width:0"></i></div></div>
+    <div class="card"><div class="label">CPU usage</div><div class="kpi" id="dCpu">–</div><div class="bar"><i id="dCpuB" style="width:0"></i></div></div>
+    <div class="card"><div class="label">Memory used</div><div class="kpi" id="dMem">–</div><div class="bar"><i id="dMemB" style="width:0"></i></div></div>
+    <div class="card"><div class="label">IP address</div><div class="kpi mono" style="font-size:20px" id="dIp">–</div><div class="note" id="dIpN">&nbsp;</div></div>
+    <div class="card"><div class="label">Kodi</div><div class="kpi" style="font-size:20px" id="dKodi">–</div><div class="note" id="dKodiN">&nbsp;</div></div>
+    <div class="card"><div class="label">Network now</div><div class="kpi" style="font-size:20px" id="dNet">–</div><div class="note" id="dNetN">&nbsp;</div></div>
+    <div class="card"><div class="label">Storage used</div><div class="kpi" style="font-size:20px" id="dDisk">–</div><div class="bar"><i id="dDiskB" style="width:0"></i></div><div class="note" id="dDiskN">&nbsp;</div></div>
+    <div class="card"><div class="label">Load average</div><div class="kpi" style="font-size:20px" id="dLoad">–</div><div class="note" id="dLoadN">&nbsp;</div></div>
+    <div class="card"><div class="label">Kodi process</div><div class="kpi" style="font-size:20px" id="dProc">–</div><div class="note" id="dProcN">&nbsp;</div></div>
+    <div class="card"><div class="label">Library</div><div class="kpi" style="font-size:20px" id="dLib">–</div><div class="note" id="dLibN">&nbsp;</div></div>
+    <div class="card"><div class="label">System</div><div class="kpi" style="font-size:20px" id="dOs">–</div><div class="note" id="dOsN">&nbsp;</div></div>
+  </div>
+  <div class="grid g2" style="margin-top:16px">
+    <div class="card"><h3>Now playing</h3><div id="dPlay" class="empty">Nothing playing</div></div>
+    <div class="card"><div class="row between"><h3>Streaming from</h3><span class="row"><button class="btn" id="ifInstall" style="display:none">Install iftop</button><button class="btn" id="ifBtn">Refresh</button></span></div>
+      <div id="ifBody" class="empty">Press Refresh to sample traffic for 3 seconds.</div>
+      <div class="note" id="ifNote"></div></div>
+  </div>
+  <div class="card" style="margin-top:16px"><div class="row between"><h3>Player process info</h3><span class="note" id="ppiNote">Same fields as Kodi's “o” overlay</span></div><div id="ppi" class="empty">Nothing playing</div></div>
+</section>
+
+<!-- SKIN TWEAKS -->
+<section class="page" id="skin">
+  <div class="row between"><h1>Skin tweaks</h1>
+    <div class="row"><select id="skinsel"></select><span class="tag" id="skinCur"></span><button class="btn" id="skinSwitch">Switch Kodi to this skin</button></div></div>
+  <p class="sub">Works on any installed skin. Settings are saved per skin and patched into a fresh copy of that skin's original XML over SSH, then the skin is reloaded. Revert puts the original files back.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Preview</h3>
+      <div class="tv" id="tv">
+        <div class="topbar" id="tb"><span>Sat 17 Oct</span><span>21:42</span></div>
+        <div class="posters" id="po"><b></b><b></b><b></b><b></b><b></b></div>
+        <div class="homebar solid" id="hb"></div>
+        <div id="vb" style="position:absolute;top:10%;right:5%;width:120px;height:6px;background:rgba(255,255,255,.25);border-radius:6px"><i style="display:block;width:65%;height:100%;background:#38bdf8;border-radius:6px"></i></div>
+      </div>
+      <div class="note">Rough sketch of what each toggle changes. The real result depends on how the skin is built, so read the report after applying.</div>
+      <div class="row" style="margin-top:12px"><button class="btn p" id="skinApply">Apply to Kodi</button><button class="btn" id="skinRevert">Revert to original</button><span id="skinBusy"></span></div>
+      <div class="report" id="skinReport"></div>
+    </div>
+    <div class="card"><h3>Home &amp; layout</h3>
+      <div class="tog"><span>Transparent home bar<div class="note">Makes the main menu's background textures see-through</div></span><div class="sw" data-k="hbTransparent"></div></div>
+      <div class="tog"><span>Disable top bar<div class="note">Hides includes/groups named like a top bar or header</div></span><div class="sw" data-k="topbar"></div></div>
+      <div class="tog"><span>Rounded posters &amp; episodes<div class="note">Posters, episode and landscape thumbnails get rounded corners</div></span><div class="sw" data-k="posters"></div></div>
+      <div class="tog"><span>Full-screen artwork<div class="note">Shows fanart full screen instead of faded on one side (Aeon Nox MyFlix and similar views)</div></span><div class="sw" data-k="fullArt"></div></div>
+      <div class="row" id="faOpts" style="margin:-2px 0 8px 0;gap:8px"><label class="f" style="flex:1;margin:0">Artwork area<select data-sel="fullArtMode"><option value="">Whole screen</option><option value="top">Top only, above the posters (solid band behind them)</option></select></label>
+        <label class="f" style="margin:0" title="Colour of the band behind the posters and the fade into it">Band colour<input type="color" data-col="fullArtColor" value="#0b0b0f" style="width:64px;height:34px;padding:2px"></label></div>
+      <div class="row" style="margin:6px 0 10px"><span class="note" style="margin:0">Corner radius</span><input type="range" min="0" max="40" value="12" id="rad" style="flex:1"><span class="mono" id="radv">12</span></div>
+      <div class="tog"><span>Hide busy spinner<div class="note">Empties DialogBusy, so nothing spins when you open a movie · this skin only</div></span><div class="sw" data-k="busy"></div></div>
+      <div class="tog"><span>Disable volume bar<div class="note">Empties DialogVolumeBar, so no overlay when you change volume</div></span><div class="sw" data-k="vol"></div></div>
+      <div class="tog"><span>Disable home bar gradients<div class="note">Removes gradient/shadow overlays behind the main menu</div></span><div class="sw" data-k="hbGradients"></div></div>
+      <h3 style="margin-top:14px">Animations</h3>
+      <div class="tog"><span>Disable all animations<div class="note">Every animation becomes instant</div></span><div class="sw" data-k="animOff"></div></div>
+      <div class="tog"><span>Disable window-switch animations<div class="note">Home → Settings and other window changes open instantly. Pick files below, or leave all for every window.</div></span><div class="sw" data-k="winAnimOff"></div></div>
+      <div class="tog"><span>…also visible/hidden animations<div class="note">Panels sliding in and out inside a window</div></span><div class="sw" data-k="winAnimVis"></div></div>
+      <h3 style="margin-top:14px">Experimental</h3>
+      <div class="tog"><span>Apple glass look<div class="note">Swaps panel backgrounds for a frosted rounded glass texture across the whole skin. Revert restores the original.</div></span><div class="sw" data-k="glass"></div></div>
+      <div style="padding-top:10px"><div class="row between"><span>Animation speed</span><span class="mono" id="spv">100% (stock)</span></div><input type="range" min="10" max="100" step="5" value="100" id="sp"><div class="note">Lower = shorter animations. Ignored while animations are disabled.</div></div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px"><div class="row between"><h3>Home bar items</h3><button class="btn" id="menuLoad">Load menu</button></div>
+    <p class="note" style="margin:0 0 10px">Pick what stays on the home bar. Leave everything unticked to keep the skin's own menu. Needs a skin that uses Skin Shortcuts (most popular skins do).</p>
+    <div class="chips" id="menuItems"><span class="empty">Press Load menu.</span></div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="menuPreset">Movies · TV Shows · Live TV · Apps · Favourites only</button><button class="btn" id="menuAll">Keep skin's menu</button></div>
+  </div>
+  <div class="card" style="margin-top:16px"><div class="row between"><h3>Custom backgrounds</h3></div>
+    <p class="note" style="margin:0 0 10px">A background image, or a folder of images as a slideshow, for any home section, library window or add-on, in any skin. Images are copied to the device over SSH and take effect on Apply.</p>
+    <table id="bgTable"></table>
+    <div class="row" style="margin-top:12px">
+      <select id="bgTarget"></select>
+      <input id="bgValue" placeholder="" style="flex:1;min-width:160px">
+      <label class="row note" style="margin:0">Dim <input type="number" id="bgDim" min="0" max="90" value="30" style="width:70px">%</label>
+      <button class="btn" id="bgImg">Image…</button><button class="btn" id="bgDir">Folder…</button>
+    </div>
+    <div class="note" id="bgHint"></div>
+  </div>
+  <div class="card" style="margin-top:16px"><div class="row between"><h3>Animation inventory</h3><div class="row"><input id="anFilter" placeholder="Filter…"><button class="btn" id="anLoad">Scan skin</button></div></div>
+    <div class="scroll"><table id="anTable"><tr><td class="empty">Press Scan skin to list every animation in the skin's XML.</td></tr></table></div>
+    <div class="note" id="anNote"></div>
+  </div>
+  <div class="card" style="margin-top:16px"><div class="row between"><h3>Window-switch animations</h3><button class="btn" id="waLoad">Load windows</button></div>
+    <p class="note" style="margin:0 0 10px">Every window open/close animation in this skin. Tick the windows to make instant (none ticked = all). Takes effect when “Disable window-switch animations” is on and you press Apply.</p>
+    <div class="scroll"><table id="waTable"><tr><td class="empty">Press Load windows.</td></tr></table></div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="waNone">Clear picks (all windows)</button><span class="note" id="waNote"></span></div>
+  </div>
+  <div class="card" style="margin-top:16px"><h3>Hide info · this skin only</h3>
+    <p class="note" style="margin:0 0 10px">Removes these labels from info panels, library views and the OSD of this skin. Each skin keeps its own list.</p>
+    <div class="chips" id="hideInfo"></div>
+    <h4 style="margin:16px 0 6px">Every text &amp; icon in this skin</h4>
+    <p class="note" style="margin:0 0 10px">Scans all the skin's windows, includes and variables (Aeon Nox builds most info through these) and lists every piece of text and every icon it draws. Tick what you want gone, then press Apply.</p>
+    <div class="row"><button class="btn" id="hiScan">Scan this skin</button><input id="hiFilter" placeholder="Filter, e.g. year, studio, flags/" style="flex:1;min-width:160px"><button class="btn" id="hiAllT">Tick all text</button><button class="btn" id="hiAllI">Tick all icons</button><button class="btn" id="hiNone">Clear</button></div>
+    <div class="scroll" style="margin-top:10px"><table id="hiTable"><tr><td class="empty">Press Scan this skin.</td></tr></table></div>
+    <span class="note" id="hiNote"></span>
+  </div>
+</section>
+
+<!-- OSD -->
+<section class="page" id="osd">
+  <h1>OSD themes</h1><p class="sub">Change the video OSD of any skin: add a zoom button, or borrow the OSD from another installed skin.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Zoom presets</h3>
+      <div class="tv"><div class="osd"><div class="row between"><b id="osdTitle">Now playing</b><span id="osdTime"></span></div><div class="tl"><i></i></div>
+        <div class="row between"><span>Play · Subs · Audio</span><div class="zoom"><span class="btn">Zoom 0</span><span class="btn p">0.20</span><span class="btn">0.35</span></div></div></div></div>
+      <div class="note">The new OSD button cycles zoom <b>0 → 0.20 → 0.35</b> (Kodi zoom 1.0 / 1.2 / 1.35), one press per step. It runs the small Kodi Control helper add-on, which is installed automatically.</div>
+      <h3 style="margin-top:14px">Try it now on the TV</h3>
+      <div class="row"><button class="btn" data-z="0">Zoom 0</button><button class="btn" data-z="1">Zoom 0.20</button><button class="btn" data-z="2">Zoom 0.35</button></div>
+    </div>
+    <div class="card"><h3>Edit OSD</h3>
+      <label class="f" style="margin-bottom:10px">Target skin<select id="osdSkin"></select></label>
+      <label class="f" style="margin-bottom:10px">OSD style source<select id="osdsrc"></select></label>
+      <div class="tog"><span>Add zoom preset button<div class="note">Cloned from the skin's first OSD button, so it matches its style</div></span><div class="sw" data-o="osdZoom"></div></div>
+      <div class="tog"><span>Transparent OSD<div class="note">Clears the OSD backgrounds; the play button, progress bar and button row stay visible</div></span><div class="sw" data-o="osdClear"></div></div>
+      <div style="padding:10px 0;border-bottom:1px solid var(--border)"><div class="row between"><span>Progress bar thickness</span><span class="mono" id="obv">stock</span></div><input type="range" min="0" max="20" step="1" value="0" id="ob"><div class="note">0 = skin default. Lower = thinner bar (pixels).</div></div>
+      <div style="padding-top:10px"><div class="row between"><span>OSD buttons<div class="note">Untick to hide a button</div></span><button class="btn" id="obLoad">Load buttons</button></div><div class="chips" id="osdBtns" style="margin-top:8px"><span class="empty">Press Load buttons.</span></div></div>
+      <div class="row" style="margin-top:12px"><button class="btn p" id="osdApply">Apply OSD</button><button class="btn" id="osdHelper">Install helper only</button><span id="osdBusy"></span></div>
+      <div class="note">Applying also applies this skin's other tweaks from the Skin tweaks page, because both are built from the skin's original files.</div>
+      <div class="report" id="osdReport"></div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px"><h3>Top 20 skins</h3><p class="note" style="margin:0 0 10px">Installed skins can be used as the OSD source. Missing ones can be installed from the Kodi repository.</p><div class="skins" id="skins"></div></div>
+</section>
+
+
+<!-- LIVE VIEW -->
+<section class="page" id="preview">
+  <div class="row between"><h1>Live view</h1>
+    <div class="row"><span class="note">Live</span><div class="sw on" id="pvLive"></div>
+      <select id="pvRate"><option value="0">as fast as possible</option><option value="1000">every 1 s</option><option value="1500" selected>every 1.5 s</option><option value="3000">every 3 s</option><option value="6000">every 6 s</option></select>
+      <button class="btn" id="pvNow">Refresh now</button><button class="btn" id="pvSave">Save PNG</button></div></div>
+  <p class="sub">Kodi's own screenshots of the TV, pulled over SSH. Menus and the OSD show; on Amlogic boxes (CoreELEC) the video itself sits on a hardware plane and usually comes out black. "As fast as possible" takes the next shot the moment the last one arrives; each frame is still a few hundred ms old because Kodi has to render, encode and send a PNG. Real zero-delay video needs an HDMI capture card on the PC.</p>
+  <div class="grid" style="grid-template-columns:minmax(0,1fr) 220px;align-items:start">
+    <div class="card" style="padding:10px"><div class="pv"><img id="pvImg" alt="Kodi screen"><div class="empty" id="pvEmpty">Connect, then open this page to see the TV.</div></div><div class="note" id="pvNote" style="margin-top:8px">&nbsp;</div></div>
+    <div class="card"><h3>Remote</h3>
+      <div class="remote">
+        <button class="btn" data-rk="menu" title="Context menu (C)">Menu</button><button class="btn" data-rk="up" aria-label="Up">▲</button><button class="btn" data-rk="info" title="Info (I)">Info</button>
+        <button class="btn" data-rk="left" aria-label="Left">◀</button><button class="btn ok" data-rk="select" aria-label="OK">OK</button><button class="btn" data-rk="right" aria-label="Right">▶</button>
+        <button class="btn" data-rk="back" title="Back (Backspace)">Back</button><button class="btn" data-rk="down" aria-label="Down">▼</button><button class="btn" data-rk="home" title="Home (H)">Home</button>
+        <button class="btn" data-rk="rew" aria-label="Step back">⏪</button><button class="btn" data-rk="playpause" aria-label="Play or pause">⏯</button><button class="btn" data-rk="fwd" aria-label="Step forward">⏩</button>
+        <button class="btn" data-rk="voldown" aria-label="Volume down">Vol−</button><button class="btn" data-rk="stop" aria-label="Stop">⏹</button><button class="btn" data-rk="volup" aria-label="Volume up">Vol+</button>
+        <button class="btn" data-rk="osd" title="OSD (M)">OSD</button><button class="btn" data-rk="ppi" title="Player process info (O)">PPI</button><button class="btn" data-rk="mute" aria-label="Mute">Mute</button>
+      </div>
+      <div class="note" style="margin-top:10px">Keyboard works while this page is open: arrows, Enter, Backspace, Space, C, I, H, M, O, +/−.</div></div>
+  </div>
+</section>
+
+<!-- KEYMAPS -->
+<section class="page" id="keymaps">
+  <div class="row between"><h1>Keymaps</h1>
+    <div class="row"><button class="btn" id="kmLoad">Load from box</button><button class="btn" id="kmLearn">Learn a key</button><button class="btn" id="kmAdd">Add binding</button><button class="btn" id="kmXml">Preview XML</button><button class="btn p" id="kmSave">Save &amp; reload</button></div></div>
+  <p class="sub">Does what the Keymap Editor add-on does: bind any keyboard key or remote button to a Kodi action, per window. Saved to <span class="mono" id="kmFile">userdata/keymaps/kodicontrol.xml</span> and reloaded right away, no restart.</p>
+  <div class="card"><h3>Your bindings</h3>
+    <div class="scroll" style="max-height:none"><table class="t km" id="kmTable"></table></div>
+    <div class="note" id="kmNote">Learn a key: press Learn, then press the button on the remote or keyboard within 10 seconds. Kodi debug logging is switched on for that moment only.</div>
+    <pre class="log" id="kmPre" style="display:none"></pre></div>
+  <div class="card" style="margin-top:16px"><div class="row between"><h3>Last key pressed</h3>
+      <div class="row"><span class="note">Watch while this page is open</span><div class="sw on" id="kwOn" role="switch" aria-label="Watch key presses"></div></div></div>
+    <div class="kw"><div class="kwKey" id="kwKey">–</div><div><div id="kwInfo" class="note" style="margin:0">Press any key on the remote or keyboard.</div>
+      <button class="btn" id="kwAdd" style="margin-top:8px" disabled>Bind this key</button></div></div>
+    <div class="scroll" style="max-height:160px;margin-top:10px"><table class="t" id="kwHist"></table></div>
+    <div class="note" id="kwNote">Reads kodi.log over SSH about 3 times a second. Kodi debug logging is on only while this page is open (Kodi shows its debug overlay meanwhile).</div></div>
+  <div class="card" style="margin-top:16px"><h3>Keymap files on the box</h3><div id="kmFiles" class="empty">Press Load from box.</div></div>
+  <div class="card" style="margin-top:16px"><div class="row between"><h3>Keymap Editor add-on settings</h3><span class="note" id="kaVer"></span></div>
+    <div id="kaBody">
+      <div class="row between" style="margin:8px 0"><span>Enable long press mapping<br><span class="note">The add-on asks "Add mapping as long press?" when you assign a key.</span></span><div class="sw" id="kaLong" role="switch" aria-label="Enable long press mapping"></div></div>
+      <div class="row between" style="margin:8px 0"><span>Support multiple keymap files<br><span class="note">Lets the add-on write to its own file name below instead of gen.xml.</span></span><div class="sw" id="kaMulti" role="switch" aria-label="Support multiple keymap files"></div></div>
+      <label class="f" style="margin:8px 0">Keymap Editor file name<input id="kaFile" placeholder="gen" aria-describedby="kaHelp"></label>
+      <div class="note" id="kaHelp">Keymaps load alphabetically and later files win. Don't name it after a file made outside the Keymap Editor (such as kodicontrol).</div>
+      <div class="row" style="margin-top:10px"><button class="btn p" id="kaSave">Save settings</button><button class="btn" id="kaOpen">Open settings on TV</button><button class="btn" id="kaRun">Run Keymap Editor on TV</button></div>
+    </div>
+    <div class="note" id="kaNote">Press Load from box.</div></div>
+  <datalist id="kmActs"></datalist><datalist id="kmWins"></datalist><datalist id="kmKeys"></datalist>
+</section>
+
+<!-- FILES -->
+<section class="page" id="files">
+  <div class="row between"><h1>Pull files</h1>
+    <div class="row"><button class="btn p" id="fpPull" disabled>Pull selected to folder…</button></div></div>
+  <p class="sub">Browse the box and copy files to this PC, or find every file with an extension (e.g. <span class="mono">xml</span>, <span class="mono">log,txt</span>) under a folder.</p>
+  <div class="card">
+    <div class="row" style="flex-wrap:wrap;gap:8px">
+      <button class="btn" id="fpUp" title="Parent folder">↑ Up</button>
+      <input id="fpDir" class="mono" style="flex:1;min-width:240px" aria-label="Folder on the box" placeholder="/storage/.kodi">
+      <button class="btn" id="fpGo">Open</button>
+      <select id="fpQuick" aria-label="Quick folders"><option value="">Jump to…</option></select>
+    </div>
+    <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:8px">
+      <input id="fpExt" style="width:200px" placeholder="Extensions: xml, log" aria-label="Extensions">
+      <select id="fpDepth" aria-label="Search depth"><option value="1">this folder only</option><option value="3">3 levels deep</option><option value="6" selected>6 levels deep</option><option value="12">12 levels deep</option></select>
+      <button class="btn" id="fpFind">Find by extension</button>
+      <button class="btn" id="fpBrowse">Back to browsing</button>
+      <input id="fpFilter" placeholder="Filter names" style="width:160px" aria-label="Filter names">
+    </div>
+    <div class="scroll" style="margin-top:10px;max-height:60vh"><table class="t" id="fpTable"></table></div>
+    <div class="note" id="fpNote">Connect, then open a folder.</div>
+  </div>
+</section>
+
+<!-- MEDIA & IPTV -->
+<section class="page" id="media">
+  <h1>Media &amp; IPTV</h1><p class="sub">Posters from a USB drive, and M3U playlists for the IPTV Simple client.</p>
+  <div class="card"><div class="row between"><h3>Posters from USB</h3>
+      <div class="row"><select id="usbMount"><option value="">No drive</option></select><button class="btn" id="usbRefresh">Find drives</button><button class="btn p" id="usbScan">Scan</button></div></div>
+    <div class="note">Matches images to your library by file or folder name, e.g. <span class="mono">Dune (2021).jpg</span>, <span class="mono">Dune (2021)/poster.jpg</span>, <span class="mono">The Bear-fanart.jpg</span>. Names with "fanart" or "landscape" set the backdrop.</div>
+    <div class="scroll" style="margin-top:10px"><table class="t" id="usbTable"></table></div>
+    <div class="row between" style="margin-top:10px">
+      <div class="tog" style="border:0;padding:0;gap:10px"><span>Copy images into the Kodi folder <span class="note">keeps working after the drive is unplugged</span></span><div class="sw on" id="usbCopy"></div></div>
+      <button class="btn p" id="usbApply" disabled>Set selected art</button></div>
+    <div class="note" id="usbNote"></div></div>
+
+  <div class="grid g2" style="margin-top:16px">
+    <div class="card"><div class="row between"><h3>M3U playlists</h3><button class="btn" id="m3uRefresh">Refresh</button></div>
+      <div class="note" id="m3uState">Not loaded.</div>
+      <label class="f" style="margin-top:10px">Playlist URL<input id="m3uUrl" placeholder="https://example.com/playlist.m3u"></label>
+      <div class="row" style="margin-top:8px"><input id="m3uName" placeholder="File name (optional)" style="flex:1"><button class="btn" id="m3uDl">Download to PC</button></div>
+      <div class="note" id="m3uDlNote"></div>
+      <div class="row" style="margin-top:8px"><button class="btn p" id="m3uSend" disabled>Move to Kodi box</button><button class="btn" id="m3uPick">Send a file from PC…</button><button class="btn" id="m3uBrowse">Load from the box…</button></div>
+      <div id="m3uBr" style="display:none;margin-top:10px">
+        <div class="row"><button class="btn" id="m3uUp">Up</button><input id="m3uPath" class="mono" style="flex:1"><button class="btn" id="m3uGo">Open</button><button class="btn" id="m3uFind">Find playlists</button></div>
+        <div class="scroll" style="max-height:220px;margin-top:6px"><table class="t" id="m3uBrList"></table></div>
+        <div class="note">Click a folder to open it, or an .m3u / .m3u8 file to load it into the IPTV folder.</div></div>
+      <h3 style="margin-top:16px">On the box <span class="note mono" id="m3uDir"></span></h3>
+      <table class="t" id="m3uFiles"></table>
+      <h3 style="margin-top:16px">Backups</h3>
+      <div class="scroll" style="max-height:180px"><table class="t" id="m3uBackups"></table></div>
+      <div class="note">Backups are kept in <span class="mono">iptv/backup</span> on the box and a copy is saved to <span class="mono" id="m3uPc"></span>.</div></div>
+    <div class="card"><h3>IPTV Simple settings</h3>
+      <div class="note" id="pvrNote">pvr.iptvsimple</div>
+      <label class="f" style="margin-top:8px">Playlist source<select id="pvSrc"><option value="file">File on the box</option><option value="url">Remote URL (Kodi downloads it)</option></select></label>
+      <label class="f" data-src="file" style="margin-top:8px">File<select id="pvFile"></select></label>
+      <label class="f" data-src="url" style="margin-top:8px">URL<input id="pvUrl" placeholder="https://…/playlist.m3u"></label>
+      <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:8px">
+        <label class="f">First channel number<input id="pvStart" type="number" min="1" value="1"></label>
+        <label class="f">Auto-refresh (minutes, 0 = off)<input id="pvRefresh" type="number" min="0" value="0"></label>
+      </div>
+      <label class="f" style="margin-top:8px">EPG (XMLTV) URL<input id="pvEpg" placeholder="https://…/guide.xml.gz"></label>
+      <label class="f" style="margin-top:8px">Channel logos<select id="pvLogo"><option value="0">From playlist only</option><option value="1">Prefer playlist, fall back to EPG</option><option value="2">Prefer EPG</option></select></label>
+      <div class="tog"><span>Cache playlist locally</span><div class="sw on" id="pvCache"></div></div>
+      <div class="row" style="margin-top:12px"><button class="btn p" id="pvApply">Apply &amp; reload channels</button></div>
+      <div class="note">The old settings file is kept as <span class="mono">.kcbak</span>. The add-on is switched off and on so it reads the new settings.</div></div>
+  </div>
+</section>
+
+<!-- LOGS -->
+<section class="page" id="logs">
+  <div class="row between"><h1>Crash &amp; log summary</h1><button class="btn p" id="logLoad">Read logs</button></div>
+  <p class="sub">Parses <span class="mono">kodi.log</span>, <span class="mono">kodi.old.log</span> and crash logs over SSH.</p>
+  <div class="grid">
+    <div class="card"><div class="label">Crashes found</div><div class="kpi" id="lCrash" style="color:var(--danger)">–</div></div>
+    <div class="card"><div class="label">Errors this session</div><div class="kpi" id="lErr">–</div><div class="note" id="lErrOld"></div></div>
+    <div class="card"><div class="label">Last crash</div><div class="kpi" style="font-size:18px" id="lLast">–</div></div>
+  </div>
+  <div class="card" style="margin-top:16px"><h3>What crashed</h3><div id="lCrashes" class="empty">Press Read logs.</div></div>
+  <div class="card" style="margin-top:16px"><h3>Errors, grouped</h3><div class="scroll" id="lGroups"><div class="empty">–</div></div>
+    <div class="row" style="margin-top:12px"><button class="btn" id="logRaw">Show log tail</button><button class="btn" id="logCopy">Copy summary</button></div>
+    <pre class="log" id="lTail" style="display:none"></pre></div>
+</section>
+
+<!-- BACKUP -->
+<section class="page" id="backup">
+  <h1>Backup &amp; restore</h1><p class="sub">Archives are pulled to <span class="mono" id="bDir"></span> on this laptop. <a href="#" id="bDirChange" style="color:var(--primary)">Change</a></p>
+  <div class="grid g2">
+    <div class="card"><div class="row between"><h3>Back up</h3><button class="btn" id="bSizes">Check sizes</button></div>
+      <div class="tog"><span>Skin settings <span class="note">addon_data/skin.* · Skin Shortcuts menus</span> <span class="mono note" data-sz="skin"></span></span><div class="sw on" data-b="skin"></div></div>
+      <div class="tog"><span>Thumbnails &amp; posters <span class="note">Thumbnails/ · Textures db</span> <span class="mono note" data-sz="thumbs"></span></span><div class="sw" data-b="thumbs"></div></div>
+      <div class="tog"><span>Keymaps <span class="note">userdata/keymaps</span> <span class="mono note" data-sz="keymaps"></span></span><div class="sw on" data-b="keymaps"></div></div>
+      <div class="tog"><span>Add-on settings &amp; sources <span class="note">addon_data · sources · favourites</span> <span class="mono note" data-sz="addons"></span></span><div class="sw on" data-b="addons"></div></div>
+      <div class="tog"><span>Kodi settings &amp; library <span class="note">guisettings · advancedsettings · video/music db</span> <span class="mono note" data-sz="settings"></span></span><div class="sw on" data-b="settings"></div></div>
+      <div class="tog"><span>Installed skins <span class="note">addons/skin.* (whole skins)</span> <span class="mono note" data-sz="skins"></span></span><div class="sw" data-b="skins"></div></div>
+      <div class="tog"><span>Repositories <span class="note">addons/repository.*</span> <span class="mono note" data-sz="repos"></span></span><div class="sw on" data-b="repos"></div></div>
+      <div class="tog"><span>Network shares &amp; saved passwords <span class="note">SMB/NFS sources · passwords.xml · samba.conf · CoreELEC mounts</span> <span class="mono note" data-sz="shares"></span></span><div class="sw on" data-b="shares"></div></div>
+      <div class="tog"><span>Account logins &amp; tokens <span class="note">add-on settings holding tokens, API keys or passwords (debrid, Trakt…)</span> <span class="mono note" data-sz="tokens"></span></span><div class="sw on" data-b="tokens"></div></div>
+      <div class="tog"><span>CoreELEC settings <span class="note">CoreELEC add-on · .config (autostart, remotes, modules) · hostname · timezone</span> <span class="mono note" data-sz="coreelec"></span></span><div class="sw on" data-b="coreelec"></div></div>
+      <div class="tog"><span>Wi-Fi &amp; network <span class="note">connman: saved Wi-Fi networks and passphrases, static IPs</span> <span class="mono note" data-sz="wifi"></span></span><div class="sw on" data-b="wifi"></div></div>
+      <div class="tog"><span>Bluetooth pairings <span class="note">.cache/bluetooth: paired remotes, headphones, controllers</span> <span class="mono note" data-sz="bluetooth"></span></span><div class="sw on" data-b="bluetooth"></div></div>
+      <div class="note">Backups with passwords and tokens are plain files on this laptop. Keep the backup folder private.</div>
+      <div class="row" style="margin-top:12px"><button class="btn p" id="bRun">Back up now</button><span class="mono note" id="bProg"></span></div></div>
+    <div class="card"><div class="row between"><h3>Restore</h3><button class="btn" id="bList">Refresh</button></div>
+      <div class="scroll"><table id="bTable"></table></div>
+      <div class="note">Restore stops Kodi, extracts the archive over the Kodi folder, then starts Kodi again.</div></div>
+  </div>
+</section>
+
+<!-- THEMES -->
+<section class="page" id="themes">
+  <h1>App themes</h1><p class="sub">84 themes · modern, retro, futuristic, Apple, open source, Steam, community and Kodi skins. Hover a card for its reference.</p>
+  <div id="themegroups"></div>
+</section>
+
+<!-- EXPERIMENTAL -->
+<section class="page" id="exp">
+  <div class="row"><h1>Experimental</h1><span class="tag warn">use with care</span></div>
+  <p class="sub">Run Kodi commands over SSH (shell, kodi-send builtins, JSON-RPC). Risky ones ask you to confirm first.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Quick commands</h3>
+      <div class="row" id="quick"></div>
+      <h3 style="margin-top:16px">Saved commands</h3>
+      <table id="savedTable"></table>
+      <div class="row" style="margin-top:10px"><input id="svName" placeholder="Name" style="width:130px"><input id="svCmd" placeholder="Command" style="flex:1"><select id="svMode"><option value="shell">Shell</option><option value="kodi-send">kodi-send</option><option value="rpc">JSON-RPC</option></select><button class="btn" id="svAdd">Save</button></div>
+    </div>
+    <div class="card"><div class="row between"><h3>Console</h3><button class="btn" id="conClear">Clear</button></div>
+      <pre class="con" id="con"></pre>
+      <div class="row" style="margin-top:10px"><input id="conIn" placeholder="Type a command…" style="flex:1"><select id="conMode"><option value="shell">Shell</option><option value="kodi-send">kodi-send</option><option value="rpc">JSON-RPC</option></select><button class="btn p" id="conRun">Run</button></div>
+      <div class="note">kodi-send takes a builtin, e.g. <span class="mono">ActivateWindow(Videos)</span>. JSON-RPC takes <span class="mono">Method.Name {"param":1}</span>. Up/Down recalls history.</div>
+    </div>
+  </div>
+</section>
+
+<!-- CONNECTION -->
+<section class="page" id="conn">
+  <h1>SSH connection</h1><p class="sub">The password is encrypted with Windows' data protection and stored only on this laptop.</p>
+  <div class="card" style="max-width:640px">
+    <div class="grid" style="grid-template-columns:1fr 1fr">
+      <label class="f">Host<input id="cHost" placeholder="192.168.1.42"></label>
+      <label class="f">Port<input id="cPort" value="22"></label>
+      <label class="f">User<input id="cUser" value="root"></label>
+      <label class="f">Auth<select id="cAuth"><option value="password">Password</option><option value="key">SSH key</option></select></label>
+      <label class="f" data-auth="password">Password<input id="cPass" type="password" placeholder=""></label>
+      <label class="f" data-auth="key">Key file<span class="row"><input id="cKey" style="flex:1"><button class="btn" id="cKeyPick">…</button></span></label>
+      <label class="f" data-auth="key">Key passphrase<input id="cPhrase" type="password" placeholder="(if any)"></label>
+    </div>
+    <h3 style="margin-top:18px">Kodi web server (JSON-RPC)</h3>
+    <div class="grid" style="grid-template-columns:1fr 1fr 1fr">
+      <label class="f">Port<input id="cRpcPort" value="8080"></label>
+      <label class="f">User<input id="cRpcUser" placeholder="kodi"></label>
+      <label class="f">Password<input id="cRpcPass" type="password"></label>
+    </div>
+    <div class="note">Used over SSH on the box itself (127.0.0.1), so nothing is exposed. Falls back to the TCP API on port 9090 if HTTP is off.</div>
+    <h3 style="margin-top:18px">Dashboard data</h3>
+    <div class="grid" style="grid-template-columns:2fr 1fr">
+      <label class="f">Fetch dashboard and JSON-RPC through<select id="cVia">
+        <option value="">SSH tunnel (default: one open connection, nothing exposed)</option>
+        <option value="web">Kodi web server, straight from this PC (needs "Allow remote control via HTTP")</option>
+        <option value="helper">Kodi Control helper add-on (all stats in one request)</option></select></label>
+      <label class="f">Helper port<input id="cHelperPort" value="8099"></label>
+    </div>
+    <div class="row" style="margin-top:8px"><button class="btn" id="cHelperInstall">Install helper add-on</button><button class="btn" id="cHelperTest">Test speed</button><span class="note" id="cHelperNote" style="margin:0"></span></div>
+    <div class="note">The helper is a small Kodi service that answers the dashboard over HTTP on your network. Only this app knows its random token. Any route falls back to SSH if it stops answering.</div>
+    <div class="row" style="margin-top:14px"><button class="btn p" id="cConnect">Connect</button><button class="btn" id="cDisconnect">Disconnect</button><span id="cStatus"></span></div>
+    <div class="report" id="cReport"></div>
+  </div>
+</section>
+
+</main></div>
+<div class="toast" id="toast"></div>
+<script src="themes-ext.js"></script>
+<script src="renderer.js"></script>
+</body></html>

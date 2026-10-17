@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kodi Control</title>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700&family=Orbitron:wght@500;700&family=VT323&family=Press+Start+2P&family=Playfair+Display:wght@600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F5F3FF;--surface:#FFFFFF;--surface2:#EBEFF9;--fg:#1E1B4B;--muted:#475569;--border:#E0E7FF;
+  --primary:#6366F1;--on-primary:#fff;--accent:#059669;--danger:#DC2626;--warn:#D97706;
+  --radius:14px;--shadow:0 4px 18px rgba(49,46,129,.08);--font:'Fira Sans',sans-serif;--mono:'Fira Code',monospace;
+  --head:'Fira Sans',sans-serif;--glow:none;--sp1:8px;--sp2:12px;--sp3:16px;--sp4:24px;
+}
+[data-theme=midnight]{--bg:#0B1020;--surface:rgba(255,255,255,.06);--surface2:rgba(255,255,255,.1);--fg:#E6E9F5;--muted:#94A3B8;--border:rgba(255,255,255,.12);--primary:#818CF8;--on-primary:#0B1020;--accent:#34D399;--shadow:0 8px 30px rgba(0,0,0,.4)}
+[data-theme=nord]{--bg:#2E3440;--surface:#3B4252;--surface2:#434C5E;--fg:#ECEFF4;--muted:#AEB7C7;--border:#4C566A;--primary:#88C0D0;--on-primary:#2E3440;--accent:#A3BE8C;--danger:#BF616A;--warn:#EBCB8B}
+[data-theme=paper]{--bg:#FAFAF7;--surface:#fff;--surface2:#F1F0EA;--fg:#1C1C1C;--muted:#5B5B5B;--border:#E3E1D8;--primary:#111;--on-primary:#fff;--accent:#0F766E;--radius:6px;--shadow:none}
+[data-theme=synthwave]{--bg:#1A0B2E;--surface:#2A1046;--surface2:#3A1660;--fg:#FCE7F3;--muted:#D8B4FE;--border:#6D28D9;--primary:#F472B6;--on-primary:#1A0B2E;--accent:#22D3EE;--warn:#FBBF24;--glow:0 0 14px rgba(244,114,182,.55);--head:'Orbitron',sans-serif}
+[data-theme=amber]{--bg:#0D0800;--surface:#160E02;--surface2:#221604;--fg:#FFB000;--muted:#C98A00;--border:#5A3D00;--primary:#FFB000;--on-primary:#0D0800;--accent:#FFD27A;--danger:#FF5A1F;--warn:#FFD27A;--radius:0;--font:'VT323',monospace;--mono:'VT323',monospace;--head:'VT323',monospace;--glow:0 0 8px rgba(255,176,0,.45);--shadow:none}
+[data-theme=pixel]{--bg:#1D2B53;--surface:#29366F;--surface2:#3B5DC9;--fg:#F4F4F4;--muted:#C2C3C7;--border:#000;--primary:#FFEC27;--on-primary:#000;--accent:#00E436;--danger:#FF004D;--warn:#FFA300;--radius:0;--head:'Press Start 2P',monospace;--shadow:4px 4px 0 #000}
+[data-theme=film]{--bg:#2B2118;--surface:#3A2D21;--surface2:#4A3A2B;--fg:#F3E9D2;--muted:#CDBB9A;--border:#6B5640;--primary:#E3A857;--on-primary:#2B2118;--accent:#9DBF9E;--head:'Playfair Display',serif;--radius:4px}
+[data-theme=y2k]{--bg:linear-gradient(135deg,#DDE6F3,#F6E3F7);--surface:rgba(255,255,255,.7);--surface2:#E7ECF7;--fg:#1B1F3B;--muted:#4B5577;--border:#B9C4E0;--primary:#3B82F6;--on-primary:#fff;--accent:#D946EF;--radius:22px;--shadow:inset 0 1px 0 #fff,0 6px 20px rgba(59,130,246,.18)}
+[data-theme=cyberpunk]{--bg:#05050A;--surface:#0E0E18;--surface2:#16162A;--fg:#F0F0F0;--muted:#9CA3AF;--border:#FCEE0A;--primary:#FCEE0A;--on-primary:#05050A;--accent:#00F0FF;--danger:#FF003C;--radius:0;--glow:0 0 10px rgba(0,240,255,.5);--head:'Orbitron',sans-serif}
+[data-theme=hud]{--bg:#020B12;--surface:rgba(0,180,255,.05);--surface2:rgba(0,180,255,.1);--fg:#CFF6FF;--muted:#6FB7CC;--border:rgba(0,200,255,.35);--primary:#00D4FF;--on-primary:#020B12;--accent:#7CFFB2;--warn:#FFB547;--radius:2px;--glow:0 0 12px rgba(0,212,255,.35);--head:'Orbitron',sans-serif;--font:'Fira Code',monospace}
+[data-theme=aurora]{--bg:radial-gradient(1200px 600px at 10% 0%,#1B3B5A,#0A0F1E 60%);--surface:rgba(255,255,255,.07);--surface2:rgba(255,255,255,.12);--fg:#EAF6FF;--muted:#A5B8D0;--border:rgba(160,255,230,.25);--primary:#5EEAD4;--on-primary:#06221F;--accent:#C084FC;--radius:18px;--glow:0 0 18px rgba(94,234,212,.3)}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--font);min-height:100vh;background-attachment:fixed}
+[data-theme=amber] body,[data-theme=amber]{font-size:19px}
+.app{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+nav{border-right:1px solid var(--border);padding:var(--sp3);display:flex;flex-direction:column;gap:4px;background:var(--surface)}
+.brand{font:700 18px var(--head);padding:8px 10px 18px;color:var(--primary);text-shadow:var(--glow);display:flex;gap:8px;align-items:center}
+[data-theme=pixel] .brand{font-size:12px}
+nav button{all:unset;cursor:pointer;padding:9px 12px;border-radius:calc(var(--radius) - 4px);display:flex;gap:10px;align-items:center;color:var(--muted)}
+nav button:hover{background:var(--surface2);color:var(--fg)}
+nav button.on{background:var(--primary);color:var(--on-primary);box-shadow:var(--glow)}
+nav button:focus-visible,.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.conn{margin-top:auto;font:12px var(--mono);color:var(--muted);padding:10px;border:1px dashed var(--border);border-radius:var(--radius)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+main{padding:var(--sp4);overflow:auto}
+h1{font:600 24px var(--head);margin-bottom:4px;text-shadow:var(--glow)}
+[data-theme=pixel] h1{font-size:16px;line-height:1.8}
+.sub{color:var(--muted);margin-bottom:var(--sp4)}
+h3{font:600 14px var(--head);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:10px}
+[data-theme=pixel] h3{font-size:9px}
+.grid{display:grid;gap:var(--sp3);grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.g2{grid-template-columns:repeat(auto-fit,minmax(360px,1fr))}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--sp3);box-shadow:var(--shadow);backdrop-filter:blur(12px)}
+.kpi{font:600 26px var(--mono);color:var(--fg)}
+.kpi small{font-size:13px;color:var(--muted)}
+.label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.bar{height:8px;background:var(--surface2);border-radius:9px;overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;background:var(--primary);box-shadow:var(--glow)}
+.btn{all:unset;cursor:pointer;padding:8px 14px;border-radius:calc(var(--radius) - 4px);background:var(--surface2);border:1px solid var(--border);font-weight:500;font-size:14px;display:inline-flex;gap:6px;align-items:center;transition:.2s}
+.btn:hover{border-color:var(--primary)}
+.btn.p{background:var(--primary);color:var(--on-primary);border-color:transparent;box-shadow:var(--glow)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.between{justify-content:space-between}
+.tog{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
+.tog:last-child{border:0}
+.sw{width:42px;height:24px;border-radius:20px;background:var(--surface2);border:1px solid var(--border);position:relative;cursor:pointer;flex:none}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--muted);transition:.2s}
+.sw.on{background:var(--primary)}.sw.on::after{left:20px;background:var(--on-primary)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:8px 6px;border-bottom:1px solid var(--border);text-align:left}
+th{color:var(--muted);font-weight:500;font-size:12px;text-transform:uppercase}
+.mono{font-family:var(--mono)}
+.tag{font:500 11px var(--mono);padding:2px 8px;border-radius:20px;border:1px solid var(--border)}
+.tag.err{color:var(--danger);border-color:var(--danger)}.tag.warn{color:var(--warn);border-color:var(--warn)}.tag.ok{color:var(--accent);border-color:var(--accent)}
+.page{display:none}.page.on{display:block}
+.tv{aspect-ratio:16/9;border-radius:var(--radius);background:linear-gradient(160deg,#20304a,#0b0f18);position:relative;overflow:hidden;border:1px solid var(--border)}
+.homebar{position:absolute;left:0;right:0;bottom:22%;display:flex;justify-content:center;gap:28px;padding:12px;font:600 15px 'Fira Sans';color:#fff}
+.homebar.solid{background:rgba(10,14,22,.85)}
+.homebar span.f{color:#7dd3fc;text-shadow:0 0 10px #7dd3fc}
+.topbar{position:absolute;top:0;left:0;right:0;height:26px;background:rgba(0,0,0,.5);font:11px 'Fira Code';color:#ccc;display:flex;justify-content:space-between;padding:5px 12px}
+.posters{position:absolute;top:22%;left:6%;display:flex;gap:10px}
+.posters b{width:58px;height:86px;background:linear-gradient(#475569,#1e293b);border:1px solid #64748b}
+.anim-dot{position:absolute;width:14px;height:14px;border-radius:50%;background:#F472B6;box-shadow:0 0 0 4px rgba(244,114,182,.3);cursor:help}
+.osd{position:absolute;left:5%;right:5%;bottom:7%;padding:10px 14px;border-radius:10px;background:rgba(0,0,0,.6);color:#fff;font:12px 'Fira Sans'}
+.osd .tl{height:4px;background:#334155;border-radius:4px;margin:6px 0}.osd .tl i{display:block;width:42%;height:100%;background:#38bdf8;border-radius:4px}
+.zoom{display:flex;gap:6px}
+.zoom .btn{padding:5px 10px;font:500 12px var(--mono)}
+.themes{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}
+.th{cursor:pointer;border-radius:12px;overflow:hidden;border:2px solid var(--border);background:var(--surface)}
+.th.on{border-color:var(--primary);box-shadow:var(--glow)}
+.th .sw3{display:flex;height:54px}.th .sw3 i{flex:1}
+.th div.n{padding:8px 10px;font-size:13px;font-weight:600}.th div.n small{display:block;font-weight:400;color:var(--muted);font-size:11px}
+input[type=range]{width:100%;accent-color:var(--primary)}
+input,select{font:14px var(--mono);background:var(--surface2);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:8px 10px}
+.skins{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+.skin{padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);cursor:pointer;font-size:13px}
+.skin:hover,.skin.on{border-color:var(--primary)}
+.skin small{display:block;color:var(--muted);font-size:11px}
+.note{font-size:12px;color:var(--muted);margin-top:8px}
+svg.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+@media (max-width:800px){.app{grid-template-columns:1fr}nav{flex-direction:row;overflow:auto}.conn,.brand{display:none}main{padding:16px}.g2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+<nav id="nav">
+  <div class="brand"><svg class="i" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 22h8M12 18v4"/></svg>Kodi Control</div>
+</nav>
+<main>
+
+<!-- DASHBOARD -->
+<section class="page on" id="dashboard">
+  <h1>Dashboard</h1><p class="sub">Live from <span class="mono">LivingRoom-Shield · 192.168.1.42</span> over SSH · updated 2s ago</p>
+  <div class="grid">
+    <div class="card"><div class="label">Resolution</div><div class="kpi">3840×2160 <small>@ 23.976Hz</small></div><div class="note">HDR10 · 4:2:0 10-bit</div></div>
+    <div class="card"><div class="label">Device temperature</div><div class="kpi">54°C</div><div class="bar"><i style="width:54%"></i></div></div>
+    <div class="card"><div class="label">CPU usage</div><div class="kpi">23%</div><div class="bar"><i style="width:23%"></i></div></div>
+    <div class="card"><div class="label">Memory used</div><div class="kpi">1.8 <small>/ 3.0 GB</small></div><div class="bar"><i style="width:60%"></i></div></div>
+    <div class="card"><div class="label">IP address</div><div class="kpi mono" style="font-size:20px">192.168.1.42</div><div class="note">eth0 · 1 Gbps · MAC 00:04:4B:…</div></div>
+    <div class="card"><div class="label">Kodi</div><div class="kpi" style="font-size:20px">v21.1 Omega</div><div class="note">Skin: Aeon Nox: SiLVO · uptime 3d 4h</div></div>
+  </div>
+  <div class="grid g2" style="margin-top:16px">
+    <div class="card"><h3>Now playing</h3>
+      <div class="row" style="align-items:flex-start;gap:14px">
+        <div style="width:80px;height:118px;border-radius:8px;background:linear-gradient(#64748b,#1e293b);flex:none"></div>
+        <div style="flex:1"><b>Dune: Part Two (2024)</b><div class="note">Movie · 2160p REMUX · TrueHD Atmos 7.1</div>
+          <div class="bar"><i style="width:42%"></i></div><div class="row between note"><span>1:06:12</span><span>2:46:00</span></div>
+          <div class="row" style="margin-top:6px"><span class="tag ok">Umbrella</span><span class="tag">Real-Debrid</span><span class="tag">48.2 Mb/s</span></div></div>
+      </div></div>
+    <div class="card"><h3>Streaming from (iftop)</h3>
+      <table><tr><th>Remote host</th><th>Source</th><th>Rate</th></tr>
+      <tr><td class="mono">sgp-5.download.real-debrid.com</td><td><span class="tag ok">Umbrella → RD</span></td><td class="mono">48.2 Mb/s</td></tr>
+      <tr><td class="mono">api.themoviedb.org</td><td>Metadata</td><td class="mono">12 kb/s</td></tr>
+      <tr><td class="mono">image.tmdb.org</td><td>Artwork</td><td class="mono">340 kb/s</td></tr>
+      <tr><td class="mono">192.168.1.85</td><td>Local NAS</td><td class="mono">0 b/s</td></tr></table>
+      <div class="note">Runs <span class="mono">iftop -t -s 2</span> over SSH and maps hosts to the active Umbrella provider.</div></div>
+  </div>
+</section>
+
+<!-- SKIN TWEAKS -->
+<section class="page" id="skin">
+  <div class="row between"><h1>Skin tweaks</h1>
+    <label class="row">Skin <select id="skinsel"></select></label></div>
+  <p class="sub">Works on any installed skin. Settings are saved per skin, patched into that skin's XML over SSH, and the skin is reloaded. A backup is taken first.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Live preview</h3>
+      <div class="tv" id="tv">
+        <div class="topbar" id="tb"><span>Sat 17 Oct</span><span>21:42</span></div>
+        <div class="posters" id="po"><b></b><b></b><b></b><b></b><b></b></div>
+        <div class="homebar" id="hb"><span class="f">Movies</span><span>TV Shows</span><span>Live TV</span><span>Apps</span><span>Favourites</span></div>
+        <div id="vb" style="position:absolute;top:10%;right:5%;width:120px;height:6px;background:rgba(255,255,255,.25);border-radius:6px"><i style="display:block;width:65%;height:100%;background:#38bdf8;border-radius:6px"></i></div>
+        <div class="anim-dot" id="ad1" style="top:30%;left:40%" title="Poster focus zoom · 300ms"></div>
+        <div class="anim-dot" id="ad2" style="bottom:24%;left:48%" title="Home bar slide · 400ms"></div>
+        <div class="anim-dot" id="ad3" style="top:4%;right:20%" title="Top bar fade · 250ms"></div>
+      </div>
+      <div class="row" style="margin-top:12px"><button class="btn p">Apply to Kodi</button><button class="btn">Revert</button></div>
+    </div>
+    <div class="card"><h3>Home &amp; layout</h3>
+      <div class="tog"><span>Transparent home bar<div class="note">Only Movies · TV Shows · Live TV · Apps · Favourites</div></span><div class="sw on" data-t="hb"></div></div>
+      <div class="tog"><span>Disable top bar</span><div class="sw" data-t="tb"></div></div>
+      <div class="tog"><span>Rounded posters</span><div class="sw on" data-t="po"></div></div>
+      <div class="row" style="margin:6px 0 10px"><span class="note" style="margin:0">Corner radius</span><input type="range" min="0" max="24" value="12" id="rad" style="flex:1"><span class="mono" id="radv">12px</span></div>
+      <div class="tog"><span>Hide busy spinner<div class="note">Hides the DialogBusy spinner when you open a movie · saved for this skin only</div></span><div class="sw on" data-t="busy"></div></div>
+      <div class="tog"><span>Disable volume bar<div class="note">Hides the DialogVolumeBar overlay when you change volume</div></span><div class="sw" data-t="vol"></div></div>
+      <h3 style="margin-top:14px">Animations</h3>
+      <div class="tog"><span>Disable all animations</span><div class="sw" data-t="anim"></div></div>
+      <div class="tog"><span>Show animation map<div class="note">Pink dots mark every animated control</div></span><div class="sw on" data-t="map"></div></div>
+      <div style="padding-top:10px"><div class="row between"><span>Animation speed</span><span class="mono" id="spv">60% (faster)</span></div><input type="range" min="10" max="100" value="60" id="sp"></div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px"><div class="row between"><h3>Custom backgrounds</h3><button class="btn">+ Add app / section</button></div>
+    <p class="note" style="margin:0 0 10px">Set a background image, a folder slideshow or the item's fanart for any home section or any add-on/app, in any skin. Images are copied to the device over SSH.</p>
+    <table><tr><th>Applies to</th><th>Source</th><th>Dim</th><th></th></tr>
+    <tr><td>Home</td><td class="mono">D:\Wallpapers\home.jpg</td><td class="mono">30%</td><td><button class="btn">Change</button></td></tr>
+    <tr><td>Movies</td><td>Fanart of focused item</td><td class="mono">40%</td><td><button class="btn">Change</button></td></tr>
+    <tr><td>Apps</td><td class="mono">D:\Wallpapers\apps\ (slideshow, 15s)</td><td class="mono">35%</td><td><button class="btn">Change</button></td></tr>
+    <tr><td>Umbrella (plugin.video.umbrella)</td><td class="mono">umbrella_bg.png</td><td class="mono">50%</td><td><button class="btn">Change</button></td></tr>
+    <tr><td>YouTube (plugin.video.youtube)</td><td>Skin default</td><td class="mono">–</td><td><button class="btn">Change</button></td></tr></table>
+  </div>
+  <div class="card" style="margin-top:16px"><h3>Animation inventory (from skin XML)</h3>
+    <table><tr><th>Control</th><th>File</th><th>Type</th><th>Time</th><th></th></tr>
+    <tr><td>Home bar menu</td><td class="mono">Home.xml:212</td><td>Slide / Focus</td><td class="mono">400ms</td><td><span class="tag ok">on</span></td></tr>
+    <tr><td>Poster wall focus</td><td class="mono">View_55_Poster.xml:88</td><td>Zoom 105%</td><td class="mono">300ms</td><td><span class="tag ok">on</span></td></tr>
+    <tr><td>Window open/close</td><td class="mono">Includes_Animations.xml:14</td><td>Fade</td><td class="mono">250ms</td><td><span class="tag ok">on</span></td></tr>
+    <tr><td>Busy spinner</td><td class="mono">DialogBusy.xml:12</td><td>Rotate</td><td class="mono">loop</td><td><span class="tag warn">hidden</span></td></tr>
+    <tr><td>Top bar</td><td class="mono">Includes_TopBar.xml:6</td><td>Fade</td><td class="mono">250ms</td><td><span class="tag warn">hidden</span></td></tr>
+    <tr><td>Fanart backdrop</td><td class="mono">Includes_Backgrounds.xml:41</td><td>Ken Burns</td><td class="mono">20000ms</td><td><span class="tag ok">on</span></td></tr></table>
+  </div>
+</section>
+
+<!-- OSD -->
+<section class="page" id="osd">
+  <h1>OSD themes</h1><p class="sub">Edit the video OSD of any skin, or borrow one from the 20 most-used skins.</p>
+  <div class="grid g2">
+    <div class="card"><h3>OSD preview</h3>
+      <div class="tv"><div class="osd"><div class="row between"><b>Dune: Part Two</b><span>1:06:12 / 2:46:00</span></div><div class="tl"><i></i></div>
+        <div class="row between"><span>⏮ ⏯ ⏭ · Subs · Audio</span><div class="zoom"><span class="btn">Zoom 0</span><span class="btn p">0.20</span><span class="btn">0.35</span></div></div></div></div>
+      <div class="note">New OSD button cycles zoom: <b>0 (default) → 0.20 → 0.35</b> in one click each. Installs as a button in VideoOSD.xml calling <span class="mono">Player.SetViewMode {"zoom":0.20}</span>.</div>
+    </div>
+    <div class="card"><h3>Edit OSD</h3>
+      <div class="row between" style="margin-bottom:10px"><span>Target skin</span><select><option>Aeon Nox: SiLVO</option><option>Arctic Fuse 2</option><option>Estuary</option></select></div>
+      <div class="row between" style="margin-bottom:10px"><span>OSD style source</span><select id="osdsrc"></select></div>
+      <div class="tog"><span>Add zoom preset button</span><div class="sw on"></div></div>
+      <div class="tog"><span>Background blur</span><div class="sw on"></div></div>
+      <div class="row between" style="padding:10px 0"><span>OSD opacity</span><input type="range" value="60" style="width:50%"></div>
+      <button class="btn p">Apply OSD</button></div>
+  </div>
+  <div class="card" style="margin-top:16px"><h3>Top 20 skins</h3><div class="skins" id="skins"></div></div>
+</section>
+
+<!-- LOGS -->
+<section class="page" id="logs">
+  <h1>Crash &amp; log summary</h1><p class="sub">Parses <span class="mono">kodi.log</span>, <span class="mono">kodi.old.log</span> and crashlogs over SSH.</p>
+  <div class="grid">
+    <div class="card"><div class="label">Crashes (7 days)</div><div class="kpi" style="color:var(--danger)">2</div></div>
+    <div class="card"><div class="label">Errors today</div><div class="kpi">14</div></div>
+    <div class="card"><div class="label">Last crash</div><div class="kpi" style="font-size:18px">Yesterday 23:10</div></div>
+  </div>
+  <div class="card" style="margin-top:16px"><h3>What crashed</h3>
+    <table><tr><th>When</th><th>Severity</th><th>Summary</th><th>Likely cause</th></tr>
+    <tr><td class="mono">16 Oct 23:10</td><td><span class="tag err">crash</span></td><td>Kodi exited (SIGSEGV) during playback start</td><td>plugin.video.umbrella – resolver timeout, then libmpeg2 abort</td></tr>
+    <tr><td class="mono">13 Oct 19:02</td><td><span class="tag err">crash</span></td><td>Skin reload froze GUI</td><td>Includes_Home.xml: duplicate control id 9000</td></tr>
+    <tr><td class="mono">17 Oct 20:15</td><td><span class="tag warn">error</span></td><td>Artwork failed to load (x9)</td><td>image.tmdb.org 429 rate limit</td></tr>
+    <tr><td class="mono">17 Oct 18:44</td><td><span class="tag warn">error</span></td><td>Script error in script.skinshortcuts</td><td>Missing property: widgetPath</td></tr></table>
+    <div class="row" style="margin-top:12px"><button class="btn">Open full log</button><button class="btn">Copy summary</button></div>
+  </div>
+</section>
+
+<!-- BACKUP -->
+<section class="page" id="backup">
+  <h1>Backup &amp; restore</h1><p class="sub">Archives are pulled to <span class="mono">D:\KodiBackups</span> on this laptop.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Back up</h3>
+      <div class="tog"><span>Skin settings <span class="note">addon_data/skin.*</span></span><div class="sw on"></div></div>
+      <div class="tog"><span>Thumbnails &amp; posters <span class="note">Thumbnails/ · 2.4 GB</span></span><div class="sw on"></div></div>
+      <div class="tog"><span>Keymaps <span class="note">userdata/keymaps</span></span><div class="sw on"></div></div>
+      <div class="tog"><span>Add-on settings &amp; sources</span><div class="sw on"></div></div>
+      <div class="tog"><span>Texture database <span class="note">Textures13.db</span></span><div class="sw on"></div></div>
+      <button class="btn p" style="margin-top:12px">Back up now</button></div>
+    <div class="card"><h3>Restore</h3>
+      <table><tr><th>Archive</th><th>Size</th><th></th></tr>
+      <tr><td class="mono">2026-10-17_full.zip</td><td>2.6 GB</td><td><button class="btn">Restore</button></td></tr>
+      <tr><td class="mono">2026-10-12_skin.zip</td><td>4 MB</td><td><button class="btn">Restore</button></td></tr>
+      <tr><td class="mono">2026-10-01_keymaps.zip</td><td>12 KB</td><td><button class="btn">Restore</button></td></tr></table></div>
+  </div>
+</section>
+
+<!-- THEMES -->
+<section class="page" id="themes">
+  <h1>App themes</h1><p class="sub">12 themes · modern, retro and futuristic. Click to apply.</p>
+  <div id="themegroups"></div>
+</section>
+
+<!-- EXPERIMENTAL -->
+<section class="page" id="exp">
+  <div class="row"><h1>Experimental</h1><span class="tag warn">use with care</span></div>
+  <p class="sub">Run Kodi commands over SSH (kodi-send, JSON-RPC, shell). Anything marked as risky asks you to confirm first.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Quick commands</h3>
+      <div class="row">
+        <button class="btn">Reload skin</button><button class="btn">Restart Kodi</button><button class="btn">Clear texture cache</button>
+        <button class="btn">Update library</button><button class="btn">Clean library</button><button class="btn">Screenshot</button>
+        <button class="btn">Toggle debug log</button><button class="btn">Refresh add-on repos</button><button class="btn">Show player info</button>
+        <button class="btn" style="color:var(--danger);border-color:var(--danger)">Reboot device</button>
+      </div>
+      <h3 style="margin-top:16px">Saved commands</h3>
+      <table><tr><th>Name</th><th>Command</th></tr>
+      <tr><td>Zoom 0.35</td><td class="mono">kodi-send -a "SetViewMode(zoom,0.35)"</td></tr>
+      <tr><td>Open Umbrella</td><td class="mono">kodi-send -a "RunAddon(plugin.video.umbrella)"</td></tr>
+      <tr><td>Disk usage</td><td class="mono">df -h /storage</td></tr></table>
+    </div>
+    <div class="card"><h3>SSH console</h3>
+      <div class="mono" style="background:#000;color:#9fef00;border-radius:8px;padding:12px;font-size:13px;min-height:220px;white-space:pre-wrap">root@LivingRoom:~# kodi-send -a "ReloadSkin()"
+Sending action: ReloadSkin()
+root@LivingRoom:~# curl -s localhost:8080/jsonrpc -d '{"jsonrpc":"2.0","method":"Player.GetActivePlayers","id":1}'
+{"id":1,"jsonrpc":"2.0","result":[{"playerid":1,"type":"video"}]}
+root@LivingRoom:~# <span style="animation:none">▌</span></div>
+      <div class="row" style="margin-top:10px"><input placeholder="Type a command…" style="flex:1"><select><option>Shell</option><option>kodi-send</option><option>JSON-RPC</option></select><button class="btn p">Run</button></div>
+    </div>
+  </div>
+</section>
+
+<!-- CONNECTION -->
+<section class="page" id="conn">
+  <h1>SSH connection</h1><p class="sub">Saved devices. Keys are stored in Windows Credential Manager.</p>
+  <div class="card" style="max-width:560px">
+    <div class="grid" style="grid-template-columns:1fr 1fr">
+      <label>Host<br><input value="192.168.1.42" style="width:100%"></label>
+      <label>Port<br><input value="22" style="width:100%"></label>
+      <label>User<br><input value="root" style="width:100%"></label>
+      <label>Auth<br><select style="width:100%"><option>SSH key</option><option>Password</option></select></label>
+    </div>
+    <div class="row" style="margin-top:14px"><button class="btn p">Connect</button><button class="btn">Test</button><span class="tag ok">connected · 8ms</span></div>
+  </div>
+</section>
+
+</main></div>
+<script>
+const I=p=>`<svg class="i" viewBox="0 0 24 24">${p}</svg>`;
+const pages=[["dashboard","Dashboard",'<rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/>'],
+["skin","Skin tweaks",'<path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/>'],
+["osd","OSD themes",'<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 15h12"/>'],
+["logs","Crash logs",'<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/>'],
+["backup","Backup",'<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>'],
+["themes","Themes",'<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 000 18"/>'],
+["exp","Experimental",'<path d="M9 3h6M10 3v6L4 20h16L14 9V3"/>'],
+["conn","SSH",'<path d="M4 17l6-5-6-5M12 19h8"/>']];
+const nav=document.getElementById('nav');
+pages.forEach(([id,n,ic],k)=>{const b=document.createElement('button');b.innerHTML=I(ic)+n;if(!k)b.className='on';
+ b.onclick=()=>{document.querySelectorAll('nav button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
+ document.querySelectorAll('.page').forEach(p=>p.classList.toggle('on',p.id==id))};nav.appendChild(b)});
+nav.insertAdjacentHTML('beforeend','<div class="conn"><span class="dot"></span> SSH root@192.168.1.42<br>Kodi 21.1 · JSON-RPC ok</div>');
+
+const themes=[["Modern",[["indigo","Indigo Soft","default",["#F5F3FF","#6366F1","#059669"]],["midnight","Midnight Glass","glassmorphism",["#0B1020","#818CF8","#34D399"]],["nord","Nord Frost","calm arctic",["#2E3440","#88C0D0","#A3BE8C"]],["paper","Paper Mono","editorial minimal",["#FAFAF7","#111","#0F766E"]]]],
+["Retro",[["synthwave","Synthwave '84","neon 80s",["#1A0B2E","#F472B6","#22D3EE"]],["amber","Amber CRT","terminal phosphor",["#0D0800","#FFB000","#FFD27A"]],["pixel","Pixel 8-bit","arcade",["#1D2B53","#FFEC27","#00E436"]],["film","Vintage Film","70s cinema",["#2B2118","#E3A857","#9DBF9E"]],["y2k","Y2K Chrome","glossy 2000s",["#DDE6F3","#3B82F6","#D946EF"]]]],
+["Futuristic",[["cyberpunk","Cyberpunk 2077","high contrast neon",["#05050A","#FCEE0A","#00F0FF"]],["hud","Sci-Fi HUD","FUI cockpit",["#020B12","#00D4FF","#7CFFB2"]],["aurora","Aurora Holo","holographic glow",["#0A0F1E","#5EEAD4","#C084FC"]]]]];
+let html='';themes.forEach(([g,list])=>{html+=`<h3 style="margin:18px 0 10px">${g}</h3><div class="themes">`+list.map(([id,n,d,c])=>`<div class="th${id=='indigo'?' on':''}" data-id="${id}"><div class="sw3">${c.map(x=>`<i style="background:${x}"></i>`).join('')}</div><div class="n">${n}<small>${d}</small></div></div>`).join('')+'</div>'});
+document.getElementById('themegroups').innerHTML=html;
+document.querySelectorAll('.th').forEach(t=>t.onclick=()=>{document.querySelectorAll('.th').forEach(x=>x.classList.remove('on'));t.classList.add('on');
+ const id=t.dataset.id;id=='indigo'?document.documentElement.removeAttribute('data-theme'):document.documentElement.setAttribute('data-theme',id);
+ try{localStorage.setItem('kc-theme',id)}catch(e){}});
+try{const s=localStorage.getItem('kc-theme');if(s)document.querySelector(`.th[data-id="${s}"]`)?.click()}catch(e){}
+
+const skins=["Estuary","Arctic Fuse 2","Aeon Nox: SiLVO","Arctic Horizon 2","Titan Bingie","Aura","Embuary","Nimbus","Confluence","Aeon MQ 8","Mimic LR","Rapier","Unity","Bello 9","Xonfluence","Amber","Eminence 2","fTV","Revolve","Pellucid"];
+document.getElementById('skins').innerHTML=skins.map((s,k)=>`<div class="skin${k==1?' on':''}">#${k+1} ${s}<small>Use OSD style</small></div>`).join('');
+document.getElementById('skinsel').innerHTML=skins.map(s=>`<option${s.startsWith('Aeon Nox')?' selected':''}>${s}</option>`).join('');
+document.getElementById('osdsrc').innerHTML=skins.map((s,k)=>`<option${k==1?' selected':''}>${s}</option>`).join('');
+document.querySelectorAll('.skin').forEach(s=>s.onclick=()=>{document.querySelectorAll('.skin').forEach(x=>x.classList.remove('on'));s.classList.add('on')});
+
+const $=id=>document.getElementById(id);
+const apply={hb:on=>$('hb').classList.toggle('solid',!on),tb:on=>$('tb').style.display=on?'none':'flex',
+ po:on=>document.querySelectorAll('#po b').forEach(b=>b.style.borderRadius=on?$('rad').value+'px':'0'),
+ map:on=>['ad1','ad2','ad3'].forEach(d=>$(d).style.display=on?'block':'none'),anim:on=>{},vol:on=>$('vb').style.display=on?'none':'block'};
+document.querySelectorAll('.sw').forEach(s=>s.onclick=()=>{s.classList.toggle('on');apply[s.dataset.t]?.(s.classList.contains('on'))});
+$('rad').oninput=e=>{$('radv').textContent=e.target.value+'px';apply.po(document.querySelector('[data-t=po]').classList.contains('on'))};
+$('sp').oninput=e=>$('spv').textContent=e.target.value+'%'+(e.target.value<100?' (faster)':' (stock)');
+apply.po(true);
+</script>
+</body></html>
