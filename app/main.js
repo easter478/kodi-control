@@ -948,10 +948,29 @@ app.whenReady().then(async () => {
     return app.exit(0);
   }
   win = new BrowserWindow({
-    width: 1360, height: 880, minWidth: 900, minHeight: 600, backgroundColor: '#0B1020', title: 'Kodi Control', autoHideMenuBar: true,
+    width: 1360, height: 880, minWidth: 900, minHeight: 600, backgroundColor: '#0B1020', title: 'Kodi Control', autoHideMenuBar: true, show: !process.argv.includes('--shots'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
   win.loadFile(path.join(__dirname, 'index.html'));
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
+  // docs: `--shots <outdir> <steps.json>` captures the app's own window contents (no desktop, no window frame).
+  // steps: [{ name, js, wait }] — js runs in the page (e.g. "show('skin')"), then after wait ms <name>.png is saved.
+  const si = process.argv.indexOf('--shots');
+  if (si > 0) {
+    const dir = process.argv[si + 1], steps = JSON.parse(fs.readFileSync(process.argv[si + 2], 'utf8'));
+    win.webContents.once('did-finish-load', async () => {
+      fs.mkdirSync(dir, { recursive: true });
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
+      await sleep(9000); // auto-connect with the saved connection and the first dashboard refresh
+      for (const s of steps) {
+        try { if (s.js) await win.webContents.executeJavaScript(s.js); } catch (e) { console.error(s.name, e.message); }
+        await sleep(s.wait || 2500);
+        if (s.name) console.log(s.name, await win.webContents.executeJavaScript('curPage'));
+        if (s.name) fs.writeFileSync(path.join(dir, s.name + '.png'), (await win.webContents.capturePage()).toPNG());
+      }
+      if (ssh) ssh.end();
+      app.exit(0);
+    });
+  }
 });
 app.on('window-all-closed', () => { if (ssh) ssh.end(); app.quit(); });
