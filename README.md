@@ -18,9 +18,14 @@ A Windows desktop app for managing a Kodi box (CoreELEC, LibreELEC, OSMC or any 
 - **OSD.**
   - Move the whole video OSD from another installed skin, with its fonts, colours, strings and icons. Tested across Aeon Nox SiLVO, Bald, Cupertino, Nimbus, Onyx, Umbrestuary and Estuary.
   - Hide individual OSD buttons, which are shown by name.
-  - Add a zoom button.
+  - Zoom preset: turn one of the OSD's own buttons (Info by default, you pick) into a 0 → 0.20 → 0.35 zoom cycle, or add a new button.
+  - A preview of the chosen source OSD, with its own icons, and the zoom button highlighted.
 - **Keymaps.** An editor for every Kodi window, with key capture from a live "last key" view. Works with the Keymap Editor add-on.
+  - Import every current keymap (including the add-on's gen.xml) into your bindings.
+  - "What each key does now": every binding Kodi loads, its defaults included, with the file it comes from and the ones a later file overrides.
 - **Live view.** A near-live screenshot of the TV, plus a remote control.
+  - Type text into Kodi. A text box pops up by itself whenever Kodi opens its keyboard.
+  - Copy the screenshot to the clipboard, or save it.
 - **Media & IPTV.**
   - Posters from a USB drive.
   - Download M3U playlists, send them from the PC, or browse the box for them.
@@ -31,6 +36,11 @@ A Windows desktop app for managing a Kodi box (CoreELEC, LibreELEC, OSMC or any 
   - Thumbnails, keymaps, add-on settings, and Kodi settings and library.
   - Network shares and saved passwords, plus add-on logins and tokens.
   - CoreELEC settings, Wi-Fi networks and Bluetooth pairings.
+- **Ports.** Every port the box listens on, the program that owns it, and clashes with Kodi's and this app's ports (Connection page).
+- **Tools menu.**
+  - Make local NFO files: next to the media on the box (Kodi's library export), or into a folder on this PC.
+  - Screenshot tool (Ctrl+Shift+S) and Copy TV screenshot (Ctrl+Shift+C).
+  - Type text into Kodi (Ctrl+T).
 - **84 app themes.**
 
 ## Install
@@ -77,7 +87,8 @@ npm test         # offline tests (needs Git Bash on Windows)
 5. **OSD.**
    1. Choose *OSD source* to borrow another installed skin's OSD.
    2. Press **Load buttons** to tick off buttons you don't want.
-   3. Press **Apply**.
+   3. Turn on **Zoom preset button** and choose which button becomes the zoom preset.
+   4. Press **Apply**.
 6. **Backup.**
    1. Tick what to save, then press **Back up now**. Archives go to `D:\KodiBackups`, or *Documents\KodiBackups* if there's no D: drive. You can change this.
    2. To restore, press **Restore** on any archive. Kodi stops, the files go back, and Kodi starts again. Restored Wi-Fi, Bluetooth and CoreELEC settings take effect after a reboot.

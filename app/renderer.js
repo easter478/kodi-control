@@ -53,7 +53,8 @@ function show(id) {
   $$('.page').forEach(p => p.classList.toggle('on', p.id === id));
   if (id === 'dashboard') poll();
   if (id === 'backup' && S.connected && !S.listed) { S.listed = true; loadBackups(); }
-  if (id === 'preview') pvLoop();
+  if (id === 'preview') { pvLoop(); if (S.connected) kbCheck(); }
+  if (id === 'osd' && S.connected && !THUMB) osdThumbLoad();
   if (id === 'keymaps' && S.connected && !KM.loaded) kmLoad();
   if (id === 'keymaps') kwStart(); else kwStop();
   if (id === 'files' && S.connected && !FP.dir) fpOpen(FP.home || '');
@@ -99,7 +100,7 @@ async function connect(c, quiet) {
     S.info = r;
     $('cPass').value = $('cPhrase').value = $('cRpcPass').value = '';
     $('cPass').placeholder = $('cRpcPass').placeholder = '(saved)';
-    setConn(true, `SSH ${c.user}@${c.host}`);
+    setConn(true, `SSH ${c.user}@${c.host}`); setTimeout(kbCheck, 1500);
     $('connBox').insertAdjacentHTML('beforeend', `<br>${r.version ? 'Kodi ' + esc(r.version) + ' · ' : ''}JSON-RPC ${r.rpcOk ? 'ok' : 'off'}`);
     $('cStatus').innerHTML = `<span class="tag ok">connected in ${r.ms} ms</span>`;
     report($('cReport'), [
@@ -269,6 +270,81 @@ document.addEventListener('keydown', e => {
   if (k) { e.preventDefault(); pvKey(k); }
 });
 
+// ---------- menu bar tools ----------
+const pop = (id, on) => { $(id).hidden = !on; if (on) setTimeout(() => ($(id).querySelector('button.p') || $(id).querySelector('button')).focus(), 30); };
+$$('[data-close]').forEach(b => b.onclick = () => pop(b.dataset.close, false));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') ['nfoPop', 'shotPop'].forEach(id => { if (!$(id).hidden) pop(id, false); }); });
+async function copyImage(src, btn) {
+  if (!src) return toast('No screenshot yet.', true);
+  try { await call('clip:image', src); toast('Screenshot copied. Paste it anywhere.'); } catch (e) { toast(e.message, true); }
+}
+const saveImage = src => { if (!src) return; const a = document.createElement('a'); a.href = src; a.download = `kodi-${Date.now()}.png`; a.click(); };
+$('pvCopy').onclick = () => copyImage($('pvImg').src);
+async function shotTake() {
+  if (!needConn()) return;
+  $('shotNote').textContent = 'Taking a screenshot of the TV…';
+  try { const t0 = Date.now(); $('shotImg').src = await call('preview:shot'); $('shotNote').textContent = `Taken ${new Date().toLocaleTimeString()} · ${Date.now() - t0} ms`; }
+  catch (e) { $('shotNote').textContent = 'Screenshot failed: ' + e.message; }
+}
+$('shotTake').onclick = shotTake;
+$('shotCopy').onclick = () => copyImage($('shotImg').src);
+$('shotSave').onclick = () => saveImage($('shotImg').src);
+const nfoTo = () => (document.querySelector('[name="nfoTo"]:checked') || {}).value;
+$$('[name="nfoTo"]').forEach(r => r.onchange = () => { $('nfoDirRow').style.display = nfoTo() === 'pc' ? '' : 'none'; $('nfoImg').disabled = nfoTo() === 'pc'; });
+$('nfoPick').onclick = async () => { const d = await call('pick:folder', 'Folder for the .nfo files'); if (d) $('nfoDir').value = d; };
+$('nfoGo').onclick = e => needConn() && act(e.currentTarget, async () => {
+  if (!$('nfoMovies').checked && !$('nfoShows').checked) throw new Error('Tick Movies or TV shows');
+  $('nfoNote').textContent = 'Working…';
+  const r = await call('nfo:export', { target: nfoTo(), movies: $('nfoMovies').checked, shows: $('nfoShows').checked, episodes: $('nfoEps').checked, images: $('nfoImg').checked, overwrite: $('nfoOver').checked, dir: $('nfoDir').value.trim() });
+  $('nfoNote').textContent = r.text; toast(r.text);
+});
+window.kc.on('menu', async id => {
+  if (id.startsWith('page:')) return show(id.slice(5));
+  if (id === 'nfo') return pop('nfoPop', true);
+  if (id === 'shot') { pop('shotPop', true); return shotTake(); }
+  if (id === 'shot:copy') { if (!needConn()) return; try { const src = await call('preview:shot'); await copyImage(src); } catch (e) { toast(e.message, true); } return; }
+  if (id === 'type') { kbHidden = false; return kbShow({ title: 'Type into the field that has focus on the TV' }); }
+  if (id === 'ports') { show('conn'); $('ptScan').click(); }
+});
+
+// ---------- ports on the box ----------
+$('ptScan').onclick = e => needConn() && act(e.currentTarget, async () => {
+  const r = await call('ports:list');
+  report($('ptIssues'), r.issues.length ? r.issues.map(i => ({ ok: !i.bad, text: i.text })) : [{ ok: true, text: `No clashes. Kodi web server ${r.settings.web}, JSON-RPC 9090, EventServer ${r.settings.es} (UDP), helper add-on ${r.settings.helper}.` }]);
+  $('ptTable').innerHTML = '<tr><th>Port</th><th>Proto</th><th>Listening on</th><th>Program</th><th>Service</th></tr>' + r.list.map(p =>
+    `<tr><td class="mono">${p.port}</td><td>${p.proto.toUpperCase()}</td><td class="mono">${esc(p.addr)}</td><td class="mono">${esc(p.prog || '?')}${p.pid ? ` <span class="note">pid ${esc(p.pid)}</span>` : ''}</td><td>${esc(p.service || '')}</td></tr>`).join('');
+});
+
+// ---------- text into Kodi's keyboard ----------
+// Kodi sends Input.OnInputRequested when its keyboard opens (search, a text field, a password), and
+// Input.OnInputFinished when it closes; the popup follows it on any page.
+async function sendText(text, done, btn) {
+  if (!needConn()) return;
+  try { await call('kodi:sendText', { text, done }); toast(done ? 'Sent and confirmed' : 'Sent to Kodi\'s keyboard'); if (curPage === 'preview') setTimeout(pvShot, 400); }
+  catch (e) { toast(/keyboard|input|not.*open|-32100/i.test(e.message) ? 'Kodi has no keyboard open: select a text field on the TV first' : e.message, true); }
+}
+$('pvTextSend').onclick = () => sendText($('pvText').value, false);
+$('pvTextDone').onclick = () => sendText($('pvText').value, true);
+$('pvText').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); sendText($('pvText').value, true); } };
+let kbHidden = false;
+function kbShow(d) {
+  if (kbHidden) return;
+  $('kbTitle').textContent = d.title ? `Kodi asks: ${d.title}` : 'Kodi is asking for text';
+  $('kbText').type = /password|pass/i.test(d.type || '') ? 'password' : 'text';
+  $('kbText').value = d.value || '';
+  $('kbPop').hidden = false;
+  setTimeout(() => { $('kbText').focus(); $('kbText').select(); }, 30);
+}
+function kbClose() { $('kbPop').hidden = true; }
+window.kc.on('kodi:input', d => { if (d.open) { kbHidden = false; kbShow(d); } else kbClose(); });
+$('kbOk').onclick = async () => { await sendText($('kbText').value, true); kbClose(); };
+$('kbType').onclick = () => sendText($('kbText').value, false);
+$('kbCancel').onclick = async () => { try { await call('kodi:closeKeyboard'); } catch {} kbClose(); };
+$('kbHide').onclick = () => { kbHidden = true; kbClose(); };
+$('kbText').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); $('kbOk').click(); } else if (e.key === 'Escape') $('kbHide').click(); };
+// a keyboard that was already open before the app connected
+async function kbCheck() { try { const k = await call('kodi:keyboardOpen'); if (k.open && $('kbPop').hidden) kbShow(k); } catch {} }
+
 // ---------- keymaps ----------
 const KM = { list: [], loaded: false, meta: null, names: {} };
 const KBD_KEYS = ['up', 'down', 'left', 'right', 'return', 'enter', 'escape', 'backspace', 'space', 'tab', 'home', 'end', 'pageup', 'pagedown', 'insert', 'delete', 'f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8', 'f9', 'f10', 'f11', 'f12', 'menu', 'browser_back', 'play_pause_media', 'stop', 'next_track', 'prev_track', 'volume_up', 'volume_down', 'volume_mute', 'launch_media_select', ...'abcdefghijklmnopqrstuvwxyz0123456789'];
@@ -303,8 +379,49 @@ function kmRender() {
   });
   $$('#kmTable [data-kdel]').forEach(el => el.onclick = () => { KM.list.splice(+el.dataset.kdel, 1); kmRender(); });
 }
+// What every key does now: system keymaps load first, then userdata/keymaps (gen.xml from the Keymap Editor
+// add-on, this app's kodicontrol.xml, any others), each folder in name order; a later file wins per
+// window + device + key. Overridden lines stay listed, struck through, so clashes are visible.
+function kmAssign() {
+  if (!KM.meta) return;
+  const order = [...KM.meta.files.filter(f => f.system), ...KM.meta.files.filter(f => !f.system)];
+  const sysOn = $('kaSys').checked, q = $('kaFind').value.trim().toLowerCase(), win = $('kaWin').value;
+  const rows = [], last = {};
+  for (const f of order) for (const b of f.binds) {
+    const k = [b.window, b.device, String(b.key).toLowerCase(), b.mod || '', !!b.longpress].join('|');
+    if (last[k]) last[k].over = f.name;
+    rows.push(last[k] = { ...b, file: f.name, sys: f.system });
+  }
+  const wins = [...new Set(rows.map(r => r.window))].sort();
+  if ($('kaWin').options.length !== wins.length + 1) { $('kaWin').innerHTML = '<option value="">All windows</option>' + wins.map(w => `<option>${esc(w)}</option>`).join(''); $('kaWin').value = win; }
+  const show = rows.filter(r => (sysOn || !r.sys) && (!win || r.window === win) && (!q || [r.window, r.device, r.key, r.label, r.action, r.file].join(' ').toLowerCase().includes(q)));
+  const clash = rows.filter(r => r.over && !r.sys).length;
+  $('kaCount').textContent = `${show.length} of ${rows.length} bindings · ${clash} of your bindings are overridden by a later file`;
+  $('kaTable').innerHTML = '<tr><th>Window</th><th>Device</th><th>Key / button</th><th>Action</th><th>From</th></tr>' + show.slice(0, 1500).map(r =>
+    `<tr${r.over ? ` style="opacity:.55" title="Overridden by ${esc(r.over)}"` : ''}><td class="mono">${esc(r.window)}</td><td>${esc(r.device)}</td><td class="mono">${r.over ? '<s>' : ''}${esc(r.label || r.key)}${r.label && r.label !== r.key ? ` <span class="note">${esc(r.key)}</span>` : ''}${r.mod ? ' +' + esc(r.mod) : ''}${r.longpress ? ' (long)' : ''}${r.over ? '</s>' : ''}</td><td class="mono">${esc(r.action)}</td><td>${esc(r.file)}${r.sys ? ' <span class="note">Kodi default</span>' : ''}${r.over ? ` <span class="note">→ ${esc(r.over)}</span>` : ''}</td></tr>`).join('');
+}
+['kaSys', 'kaWin'].forEach(id => $(id).onchange = kmAssign);
+$('kaFind').oninput = kmAssign;
+function kmImport(files) {
+  const seen = new Set(KM.list.map(x => [x.window, x.device, x.key, x.mod, !!x.longpress].join('|')));
+  const add = [];
+  for (const f of files) for (const { file, label, system, ...x } of f.binds) {
+    const k = [x.window, x.device, x.key, x.mod, !!x.longpress].join('|');
+    if (!seen.has(k)) { seen.add(k); add.push(x); }
+  }
+  KM.list.push(...add); kmRender();
+  return add.length;
+}
+$('kmImportAll').onclick = () => {
+  if (!KM.meta) return toast('Press Load from box first.', true);
+  const files = KM.meta.files.filter(f => !f.system && f.name !== 'kodicontrol.xml');
+  if (!files.length) return toast('No other keymap files in userdata/keymaps.', true);
+  const n = kmImport(files);
+  toast(`Imported ${n} bindings from ${files.map(f => f.name).join(', ')}. Save & reload to apply; you can then delete those files so they don't fight with kodicontrol.xml.`);
+};
 function kmFiles() {
-  const files = KM.meta.files;
+  kmAssign();
+  const files = KM.meta.files.filter(f => !f.system);
   if (!files.length) { $('kmFiles').className = 'empty'; $('kmFiles').textContent = 'No keymap files in userdata/keymaps yet.'; return; }
   $('kmFiles').className = '';
   $('kmFiles').innerHTML = files.map((f, i) => `<details style="margin-bottom:8px"><summary class="row between" style="cursor:pointer"><span><b class="mono">${esc(f.name)}</b> <span class="note">${f.binds.length} bindings${f.name === 'kodicontrol.xml' ? ' · written by this app' : ''}</span></span>${f.name === 'kodicontrol.xml' ? '' : `<button class="btn" data-imp="${i}">Import into my bindings</button>`}</summary>
@@ -312,10 +429,8 @@ function kmFiles() {
   $$('[data-imp]').forEach(b => b.onclick = e => {
     e.preventDefault();
     const f = files[+b.dataset.imp];
-    const seen = new Set(KM.list.map(x => [x.window, x.device, x.key, x.mod, !!x.longpress].join('|')));
-    const add = f.binds.filter(x => !seen.has([x.window, x.device, x.key, x.mod, !!x.longpress].join('|'))).map(({ file, ...x }) => x);
-    KM.list.push(...add); kmRender();
-    toast(`Imported ${add.length} bindings from ${f.name}. Save & reload to apply. You can then delete ${f.name} so the two files don't fight.`);
+    const n = kmImport([f]);
+    toast(`Imported ${n} bindings from ${f.name}. Save & reload to apply. You can then delete ${f.name} so the two files don't fight.`);
   });
 }
 async function kmLoad(btn) {
@@ -657,6 +772,7 @@ function loadSkinState() {
   $$('#osd .sw[data-o]').forEach(s => s.classList.toggle('on', !!T[s.dataset.o]));
   $('ob').value = T.osdBarH || 0; obLabel(); OB = []; renderOsdBtns();
   $('osdReport').innerHTML = '';
+  THUMB = null; thumbFor = ''; zrVis(); if (curPage === 'osd') osdThumbLoad();
 }
 let saveT;
 function save() {
@@ -839,7 +955,7 @@ function renderOsdBtns() {
   }).join('')}</div>`).join('');
   $$('[data-ob]').forEach(c => c.onchange = () => {
     c.parentElement.classList.toggle('on', c.checked);
-    T.osdHide = $$('[data-ob]').filter(x => !x.checked).map(x => x.dataset.ob); save();
+    T.osdHide = $$('[data-ob]').filter(x => !x.checked).map(x => x.dataset.ob); save(); renderThumb();
   });
 }
 $('obLoad').onclick = e => needConn() && tid && act(e.currentTarget, async () => {
@@ -847,10 +963,57 @@ $('obLoad').onclick = e => needConn() && tid && act(e.currentTarget, async () =>
   if (!OB.length) toast('No VideoOSD.xml buttons found in this skin.', true);
   renderOsdBtns();
 });
-function saveOsd() { T.osdFrom = $('osdsrc').value; T.osdHide = []; OB = []; save(); renderOsdBtns(); }
+function saveOsd() { T.osdFrom = $('osdsrc').value; T.osdHide = []; OB = []; delete T.zoomReplace; delete T.zoomReplaceName; THUMB = null; save(); renderOsdBtns(); osdThumbLoad(); }
 $('osdsrc').onchange = saveOsd;
-$$('#osd .sw[data-o]').forEach(s => s.onclick = () => { T[s.dataset.o] = s.classList.toggle('on'); save(); });
+$$('#osd .sw[data-o]').forEach(s => s.onclick = () => { T[s.dataset.o] = s.classList.toggle('on'); save(); if (s.dataset.o === 'osdZoom') { zrVis(); if (T.osdZoom) osdThumbLoad(); } });
+
+// Zoom preset: which of the OSD's buttons it takes over (Info unless you pick another), and a thumbnail of the
+// chosen OSD (its own icons, in order) with that button highlighted
+var THUMB = null, thumbFor = '';
+const videoBtns = () => OB.filter(b => (b.section || 'Video') === 'Video' && !b.dup);
+function zrVis() { $('zrWrap').style.display = T.osdZoom ? '' : 'none'; }
+async function osdThumbLoad() {
+  const src = T.osdFrom || tid;
+  if (!S.connected || !src) return;
+  const name = (S.skins.find(s => s.id === src) || {}).name || src;
+  $('osdThumbNote').textContent = `Reading the ${name} OSD…`;
+  try {
+    if (!OB.length) { OB = await call('skin:osdButtons', { id: tid, from: T.osdFrom }); renderOsdBtns(); }
+    if (thumbFor !== src) { THUMB = await call('skin:osdThumb', { id: src }); thumbFor = src; }
+  } catch (e) { $('osdThumbNote').textContent = e.message; return; }
+  if (T.zoomReplace === undefined) {
+    const info = videoBtns().find(b => /\binfo/i.test(b.name || '') || /Info|ShowInfo|information/i.test(b.onclick || ''));
+    if (info) { T.zoomReplace = info.id; T.zoomReplaceName = info.name; save(); }
+  }
+  renderZoomRep(); renderThumb();
+  $('osdThumbNote').textContent = `${name} OSD: ${videoBtns().length} buttons${THUMB.icons.length ? '' : ' (this skin draws its icons with a font, so they show as names)'}. The highlighted one becomes the zoom preset.`;
+}
+function renderZoomRep() {
+  const list = videoBtns();
+  $('zoomRep').innerHTML = `<option value="">Pick the button to replace…</option><option value="new">Don't replace any: add a new button</option>` +
+    list.map(b => `<option value="${esc(b.id)}">${esc(b.name || b.label || 'Button')} · id ${esc(b.id)}</option>`).join('');
+  $('zoomRep').value = T.zoomReplace === '' ? 'new' : (T.zoomReplace || '');
+  $('zrNote').textContent = !T.zoomReplace && T.zoomReplace !== '' ? 'Choose which button to give up for the zoom preset.'
+    : T.zoomReplace === '' ? 'A separate Zoom button is added to the OSD.' : `"${T.zoomReplaceName || T.zoomReplace}" will cycle the zoom instead.`;
+}
+$('zoomRep').onchange = () => {
+  const v = $('zoomRep').value, b = OB.find(x => x.id === v);
+  if (v === 'new') { T.zoomReplace = ''; delete T.zoomReplaceName; } else if (b) { T.zoomReplace = b.id; T.zoomReplaceName = b.name; } else delete T.zoomReplace;
+  save(); renderZoomRep(); renderThumb();
+};
+function renderThumb() {
+  if (!THUMB) return;
+  const icon = Object.fromEntries(THUMB.icons.map(i => [i.tex, i.src]));
+  const z = T.osdZoom ? T.zoomReplace : null;
+  const cells = videoBtns().filter(b => !T.osdHide.includes(b.id)).map(b => {
+    const n = esc(b.id === z ? 'Zoom' : (b.name || b.label || 'Button'));
+    return icon[b.tex] ? `<div class="ob${b.id === z ? ' z' : ''}" title="${n}"><img src="${icon[b.tex]}" alt=""><small>${n}</small></div>` : `<div class="ob t${b.id === z ? ' z' : ''}">${n}</div>`;
+  });
+  if (T.osdZoom && T.zoomReplace === '') cells.push('<div class="ob t z">Zoom</div>');
+  $('osdThumb').innerHTML = cells.join('') || '<span>No buttons found</span>';
+}
 $('osdApply').onclick = e => needConn() && tid && act(e.currentTarget, async () => {
+  if (T.osdZoom && T.zoomReplace === undefined) { await osdThumbLoad(); if (T.zoomReplace === undefined) { $('zoomRep').focus(); throw new Error('Pick which OSD button should become the zoom preset first'); } }
   $('osdReport').innerHTML = '<div class="note">Patching skin files over SSH…</div>';
   report($('osdReport'), (await call('skin:apply', { id: tid, t: T })).report);
 });

@@ -357,6 +357,39 @@ const AEON = {
     ok(/<onload condition="String.IsEmpty\(Skin.String\(OSDStyle\)\)">Skin.SetString\(OSDStyle,0\)<\/onload>/.test(x), 'not seeded');
     ok(/<visible>true<\/visible>/.test(x), 'ShowClock not fixed to the source value');
   });
+  await test('OSD move: renumbered custom windows follow into include params and SetProperty; skin scripts are copied', async () => {
+    const other = { 'xml/VideoOSD.xml': `<window><controls><control type="button" id="70043"><onfocus>ActivateWindow(1120)</onfocus><onclick>RunScript(special://skin/scripts/zoom.py)</onclick></control></controls></window>`,
+      'xml/Custom_1120_OSDInfoPanel.xml': `<window type="dialog" id="1120"><controls><include content="Row"><param name="owner">1120</param></include><control type="button" id="5"><onclick>SetProperty(a,b,1120)</onclick></control></controls></window>`,
+      'xml/Includes.xml': '<includes><include name="Row"><param name="owner" /><definition><control type="button" id="6"><onfocus>Dialog.Close($PARAM[owner],true)</onfocus></control></definition></include></includes>' };
+    const r = skin.applyAll({ 'xml/Home.xml': '<window/>', 'xml/Includes.xml': '<includes></includes>', 'xml/custom_1120_CastDialog.xml': '<window type="dialog" id="1120"/>' }, { ...T0, osdFrom: 'skin.x' }, { dirs: ['xml'], res: [1920, 1080], otherSkin: other, otherExtra: { colors: '', strings: '', media: [] } });
+    const k = Object.keys(r.changed).find(f => /OSDInfoPanel/.test(f));
+    ok(k && !/^xml\/Custom_1120_/.test(k), 'panel not renumbered');
+    const nid = /Custom_(\d+)_/.exec(k)[1], x = r.changed[k];
+    ok(x.includes(`<param name="owner">${nid}</param>`), 'owner param still points at 1120 (Aeon\'s Cast dialog)');
+    ok(x.includes(`SetProperty(a,b,${nid})`), 'SetProperty window not renumbered');
+    ok(/RunScript\(special:\/\/skin\/kcsrc\/scripts\/zoom\.py\)/.test(r.changed['xml/VideoOSD.xml']), 'script path not moved');
+    ok(r.assets.some(a => a.from === 'scripts' && a.to === 'kcsrc/scripts' && a.dir), 'scripts folder not copied');
+  });
+  await test('zoom preset replaces the chosen OSD button, template buttons and their panel-opening wrappers too', async () => {
+    const files = { 'xml/VideoOSD.xml': `<window><controls><control type="grouplist" id="201">
+        <control type="button" id="600"><onclick>PlayerControl(Previous)</onclick><texturenofocus>osd/info.png</texturenofocus></control>
+        <include content="Slot_Info"/>
+        <include content="Btn"><param name="id">70064</param><param name="icon">osd/zoom.png</param><onclick>RunScript(special://skin/scripts/zoom.py)</onclick></include>
+      </control></controls></window>`,
+      'xml/Includes.xml': `<includes><include name="Btn"><param name="id"/><param name="icon"/><definition><control type="button" id="$PARAM[id]"><texturenofocus>$PARAM[icon]</texturenofocus></control></definition></include>
+        <include name="InfoBody"><definition><include content="Btn"><param name="id">70043</param><param name="icon">osd/info.png</param><onclick>Info</onclick></include></definition></include>
+        <include name="Slot_Info"><include content="InfoBody"><onfocus>ActivateWindow(1120)</onfocus></include></include></includes>` };
+    const one = skin.applyAll({ ...files }, { ...T0, osdZoom: true, zoomReplace: '70043' }, { dirs: ['xml'], res: [1920, 1080] });
+    const inc = one.changed['xml/Includes.xml'];
+    ok(/<param name="id">70043<\/param><param name="icon">osd\/zoom.png<\/param>/.test(inc.replace(/<!--[^>]*-->|<onclick>RunScript\(script.kodicontrol,zoom\)<\/onclick>/g, '').replace(/\s+/g, '')) || /osd\/zoom\.png/.test(inc.split('70043')[1].slice(0, 120)), 'info icon not swapped for the zoom icon');
+    ok(/70043[\s\S]{0,200}/.test(inc) && !/<onclick>Info<\/onclick>/.test(inc), 'old Info action kept');
+    ok(/RunScript\(script\.kodicontrol,zoom\)/.test(inc), 'zoom action missing');
+    ok(!/ActivateWindow\(1120\)/.test(inc), 'wrapper still opens the info panel on focus');
+    const two = skin.applyAll({ ...files }, { ...T0, osdZoom: true, zoomReplace: '600' }, { dirs: ['xml'], res: [1920, 1080] });
+    const v = two.changed['xml/VideoOSD.xml'];
+    ok(/id="600"><!-- kodicontrol: zoom --><onclick>RunScript\(script\.kodicontrol,zoom\)<\/onclick>/.test(v) && !/Previous/.test(v), 'direct button not replaced');
+    ok(!/id="9871"/.test(v), 'a new button was added as well');
+  });
   await test('xbt: LZO1X frames decode (literal run + back reference)', async () => {
     const xbt = require('../app/xbt');
     // "abcabcabc": 3 literals, then a match of 6 at distance 3, then end of stream

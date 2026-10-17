@@ -134,11 +134,14 @@ function make(ctx) {
     return out;
   }
   async function keymapList() {
-    const raw = await sh(`cd ${q(KM_DIR())} 2>/dev/null && for f in *.xml; do [ -f "$f" ] && { echo "==FILE $f"; cat "$f"; }; done`);
+    // userdata/keymaps (this app's file, the Keymap Editor add-on's gen.xml, any others) and Kodi's own
+    // system keymaps, which load first: Kodi reads system then user files, each folder in name order
+    const raw = await sh(`cd ${q(KM_DIR())} 2>/dev/null && for f in *.xml; do [ -f "$f" ] && { echo "==FILE $f"; cat "$f"; }; done; ` +
+      `for d in /usr/share/kodi/system/keymaps /usr/local/share/kodi/system/keymaps /usr/lib/kodi/system/keymaps; do [ -d "$d" ] && { cd "$d" && for f in *.xml; do [ -f "$f" ] && { echo "==SYS $f"; cat "$f"; }; done; break; }; done; true`, { timeout: 30000 });
     const files = [];
-    for (const part of raw.split('==FILE ').slice(1)) {
-      const i = part.indexOf('\n'), name = part.slice(0, i).trim();
-      files.push({ name, binds: parseKeymap(part.slice(i + 1), name).map(b => ({ ...b, label: keyName(b.key) })) });
+    for (const part of raw.split(/==(?=FILE |SYS )/).slice(1)) {
+      const sys = part.startsWith('SYS '), i = part.indexOf('\n'), name = part.slice(sys ? 4 : 5, i).trim();
+      files.push({ name, system: sys, binds: parseKeymap(part.slice(i + 1), name).map(b => ({ ...b, label: keyName(b.key), system: sys })) });
     }
     return { files, ours: cfg().keymaps || [], actions: ACTIONS, windows: WINDOWS, remoteKeys: REMOTE_KEYS, dir: KM_DIR() };
   }

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, safeStorage, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, safeStorage, shell, clipboard, nativeImage, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const dns = require('dns').promises;
@@ -110,7 +110,12 @@ function rpcTunnel() {
           else if (c === '{') { if (!depth++) start = i; }
           else if (c === '}' && depth && !--depth) {
             cut = i + 1;
-            try { const o = JSON.parse(rpcBuf.slice(start, i + 1)); const w = rpcWait.get(o.id); if (w) { rpcWait.delete(o.id); w(o); } } catch {}
+            try {
+              const o = JSON.parse(rpcBuf.slice(start, i + 1));
+              // notifications (no id): the keyboard opening / closing goes to Live view's text box
+              if (o.method && o.id === undefined) { if (/^Input\.OnInput(Requested|Finished)$/.test(o.method) && win && !win.isDestroyed()) win.webContents.send('kodi:input', { open: o.method === 'Input.OnInputRequested', ...(o.params && o.params.data || {}) }); }
+              else { const w = rpcWait.get(o.id); if (w) { rpcWait.delete(o.id); w(o); } }
+            } catch {}
           }
         }
         rpcBuf = rpcBuf.slice(cut);
@@ -123,6 +128,9 @@ function rpcTunnel() {
   });
   return rpcSockP;
 }
+// keep the tunnel open while connected, whatever the dashboard route: Kodi only sends its notifications
+// (the on-screen keyboard opening) down an open JSON-RPC TCP connection
+setInterval(() => { if (ssh && !rpcSock && !rpcSockP) rpcTunnel().catch(() => {}); }, 5000);
 function rpcTunnelCall(id, body, ms = 8000) {
   return rpcTunnel().then(st => new Promise(resolve => {
     const t = setTimeout(() => { rpcWait.delete(id); resolve(null); }, ms);
@@ -139,7 +147,7 @@ async function rpcDirect(id, body) {
   if (r.status === 401) throw new Error('Kodi web server asked for a user name and password (set them in Connection)');
   return splitJson(await r.text()).find(o => o.id === id) || null;
 }
-async function rpc(method, params = {}) {
+async function rpc(method, params = {}, ms = 8000) {
   const id = rpcId++;
   const body = JSON.stringify({ jsonrpc: '2.0', id, method, params });
   const c = cfg.conn;
@@ -152,7 +160,7 @@ async function rpc(method, params = {}) {
     if (r) { rpcMode = 'web'; if (r.error) throw new Error(`${method}: ${r.error.message}`); return r.result; }
   }
   if (rpcMode !== 'http' && rpcMode !== 'tcp') {
-    const r = await rpcTunnelCall(id, body).catch(() => null);
+    const r = await rpcTunnelCall(id, body, ms).catch(() => null);
     if (r) {
       rpcMode = 'tunnel';
       if (r.error) throw new Error(`${method}: ${r.error.message}${r.error.data ? ' (' + JSON.stringify(r.error.data).slice(0, 200) + ')' : ''}`);
@@ -256,7 +264,58 @@ async function ensureHelper() {
   return enabled ? 'Helper add-on ready' : 'Helper add-on copied, but Kodi has not picked it up yet: restart Kodi, then enable "Kodi Control helper" under My add-ons → Program add-ons';
 }
 
+// ---------- local NFO files ----------
+// box: Kodi's own "Export library → separate files" (an .nfo, and optionally the artwork, next to each item).
+// pc: the same Kodi-format .nfo files written into a folder on this PC, one folder per movie / show.
+const xe = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const safeDir = s => String(s).replace(/[<>:"/\\|?*\x00-\x1f]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '').slice(0, 120) || 'Untitled';
+function nfoXml(root, it, extra = '') {
+  const tag = (n, v) => v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length) ? '' : (Array.isArray(v) ? v : [v]).map(x => `  <${n}>${xe(x)}</${n}>\n`).join('');
+  const ids = Object.entries(it.uniqueid || {}).map(([t, v], i) => `  <uniqueid type="${xe(t)}"${i ? '' : ' default="true"'}>${xe(v)}</uniqueid>\n`).join('');
+  const ratings = Object.entries(it.ratings || {}).map(([t, r]) => `    <rating name="${xe(t)}" max="10"${r.default ? ' default="true"' : ''}><value>${(+r.rating || 0).toFixed(1)}</value><votes>${+r.votes || 0}</votes></rating>\n`).join('');
+  const cast = (it.cast || []).slice(0, 30).map(c => `  <actor><name>${xe(c.name)}</name><role>${xe(c.role)}</role><order>${+c.order || 0}</order>${c.thumbnail ? `<thumb>${xe(decodeImg(c.thumbnail))}</thumb>` : ''}</actor>\n`).join('');
+  const art = it.art || {};
+  const thumbs = ['poster', 'banner', 'clearlogo', 'clearart', 'landscape', 'keyart', 'discart'].filter(k => art[k]).map(k => `  <thumb aspect="${k}">${xe(decodeImg(art[k]))}</thumb>\n`).join('') + (art.fanart ? `  <fanart><thumb>${xe(decodeImg(art.fanart))}</thumb></fanart>\n` : '');
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>\n<!-- made by Kodi Control from the Kodi library -->\n<${root}>\n` +
+    tag('title', it.title) + tag('originaltitle', it.originaltitle) + tag('sorttitle', it.sorttitle) + (ratings ? `  <ratings>\n${ratings}  </ratings>\n` : '') +
+    tag('userrating', it.userrating || undefined) + tag('outline', it.plotoutline) + tag('plot', it.plot) + tag('tagline', it.tagline) + tag('runtime', it.runtime ? Math.round(it.runtime / 60) : '') +
+    tag('mpaa', it.mpaa) + tag('playcount', it.playcount || undefined) + tag('lastplayed', it.lastplayed) + ids + tag('genre', it.genre) + tag('country', it.country) + tag('set', it.set) +
+    tag('tag', it.tag) + tag('credits', it.writer) + tag('director', it.director) + tag('premiered', it.premiered) + tag('year', it.year || undefined) + tag('studio', it.studio) +
+    tag('trailer', it.trailer) + extra + thumbs + cast + `</${root}>\n`;
+}
+function decodeImg(u) { const m = /^image:\/\/(.+?)\/?$/.exec(u || ''); return m ? decodeURIComponent(m[1]) : u; }
+async function nfoExport({ target, movies, shows, episodes, overwrite, images, dir }) {
+  if (target === 'box') {
+    await rpc('VideoLibrary.Export', { options: { overwrite: !!overwrite, images: !!images, actorthumbs: !!images } }, 600000);
+    return { text: 'Kodi is writing an .nfo next to every movie, show and episode in the library' + (images ? ', with the artwork' : '') + '. It shows its progress on the TV.' };
+  }
+  if (!dir) throw new Error('Choose a folder on this PC first');
+  let n = 0;
+  const write = (rel, x) => { const f = path.join(dir, rel); if (!overwrite && fs.existsSync(f)) return; fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, x); n++; };
+  const common = ['title', 'originaltitle', 'sorttitle', 'plot', 'year', 'premiered', 'genre', 'studio', 'mpaa', 'ratings', 'userrating', 'uniqueid', 'cast', 'art', 'playcount', 'lastplayed', 'tag', 'file'];
+  if (movies) {
+    const r = await rpc('VideoLibrary.GetMovies', { properties: [...common, 'plotoutline', 'tagline', 'runtime', 'country', 'set', 'writer', 'director', 'trailer'] }, 120000);
+    for (const m of r.movies || []) write(path.join('Movies', safeDir(`${m.title} (${m.year || '?'})`), 'movie.nfo'), nfoXml('movie', m, m.file ? `  <!-- file: ${xe(m.file)} -->\n` : ''));
+  }
+  if (shows) {
+    const r = await rpc('VideoLibrary.GetTVShows', { properties: common.filter(p => p !== 'file').concat('episode', 'season') }, 120000);
+    for (const s of r.tvshows || []) {
+      const sd = path.join('TV Shows', safeDir(`${s.title} (${s.year || '?'})`));
+      write(path.join(sd, 'tvshow.nfo'), nfoXml('tvshow', s, tagOf('season', s.season) + tagOf('episode', s.episode)));
+      if (!episodes) continue;
+      const e = await rpc('VideoLibrary.GetEpisodes', { tvshowid: s.tvshowid, properties: ['title', 'plot', 'season', 'episode', 'firstaired', 'runtime', 'director', 'writer', 'ratings', 'uniqueid', 'art', 'playcount', 'lastplayed', 'cast', 'file'] }, 120000);
+      for (const ep of e.episodes || []) {
+        const se = `S${String(ep.season).padStart(2, '0')}E${String(ep.episode).padStart(2, '0')}`;
+        write(path.join(sd, `Season ${ep.season}`, safeDir(`${se} ${ep.title}`) + '.nfo'), nfoXml('episodedetails', { ...ep, premiered: ep.firstaired }, tagOf('season', ep.season) + tagOf('episode', ep.episode) + tagOf('aired', ep.firstaired)));
+      }
+    }
+  }
+  return { text: `${n} .nfo file${n === 1 ? '' : 's'} written to ${dir}`, dir };
+}
+const tagOf = (n, v) => v === undefined || v === '' ? '' : `  <${n}>${xe(v)}</${n}>\n`;
+
 // ---------- stats ----------
+let osdThumbCache = {};
 let prevCpu = null, prevNet = null, prevKodi = null, libCache = { t: 0, v: null }, thumbCache = { key: '', data: '' };
 // ---------- stats helper service (optional, Connection → Dashboard data) ----------
 const helperUrl = p => `http://${cfg.conn.host}:${+cfg.conn.helperPort || 8099}${p}${p.includes('?') ? '&' : '?'}t=${encodeURIComponent(unseal(cfg.conn.helperToken || ''))}`;
@@ -731,13 +790,13 @@ async function applySkin(id, t) {
   const added = Object.keys(upload).filter(k => !files[k]);
   const manifest = `${KH}/kodicontrol/added-${id}.txt`;
   // restore pristine, drop previously added files, then write the new set
-  await exec(`cd ${q(p.s.path)} && [ -f ${q(manifest)} ] && while IFS= read -r f; do rm -f "./$f"; done < ${q(manifest)}; tar -C ${q(p.s.path)} -xf ${q(p.orig)}; [ -f ${q(p.colors)} ] && tar -C ${q(p.s.path)} -xf ${q(p.colors)}; true`, { timeout: 60000 });
+  await exec(`cd ${q(p.s.path)} && [ -f ${q(manifest)} ] && while IFS= read -r f; do [ -n "$f" ] && rm -rf "./$f"; done < ${q(manifest)}; tar -C ${q(p.s.path)} -xf ${q(p.orig)}; [ -f ${q(p.colors)} ] && tar -C ${q(p.s.path)} -xf ${q(p.colors)}; true`, { timeout: 60000 });
   if (Object.keys(upload).length) {
     const r = await exec(`tar -C ${q(p.s.path)} -xf - && printf '%s\\n' ${added.map(q).join(' ') || "''"} > ${q(manifest)}`, { stdin: buildTar(upload), timeout: 60000 });
     if (r.code) throw new Error('Writing skin files failed: ' + r.err.slice(0, 200));
   } else await exec(`rm -f ${q(manifest)}`);
   if (copies.length && other) {
-    const cmd = copies.map(a => `mkdir -p ${q(path.posix.dirname(a.to))} && cp -f ${q(other.s.path + '/' + a.from)} ${q(a.to)} && echo ${q(a.to)} >> ${q(manifest)}`).join('; ');
+    const cmd = copies.map(a => `mkdir -p ${q(path.posix.dirname(a.to))} && ${a.dir ? `rm -rf ${q(a.to)} && cp -rf` : 'cp -f'} ${q(other.s.path + '/' + a.from)} ${q(a.to)} && echo ${q(a.to)} >> ${q(manifest)}`).join('; ');
     await exec(`cd ${q(p.s.path)} && { ${cmd}; true; }`, { timeout: 60000 });
   }
 
@@ -874,10 +933,76 @@ const handlers = {
     const po = await sh(`cat ${q(r.s.path + '/language/resource.language.en_gb/strings.po')} 2>/dev/null; for d in /usr/share/kodi /usr/lib/kodi ${q(KH)}; do f="$d/addons/resource.language.en_gb/resources/strings.po"; [ -f "$f" ] && { cat "$f"; break; }; done`, { timeout: 30000 }).catch(() => '');
     return skin.osdButtons(r.files, skin.parsePo(po));
   },
+  // a thumbnail of a skin's OSD: its buttons in order, each with the skin's own icon (loose or from Textures.xbt)
+  'skin:osdThumb': async ({ id }) => {
+    if (osdThumbCache[id]) return osdThumbCache[id];
+    const r = await readSkinXml(id);
+    const btns = skin.osdButtons(r.files, {}).filter(b => !b.dup && (b.section || 'Video') === 'Video');
+    const want = [...new Set(btns.map(b => (b.tex || '').trim()).filter(t => /^[\w.\-\/ ]+\.(png|jpg)$/i.test(t)))].slice(0, 16);
+    const media = r.s.path + '/media';
+    const loose = new Set((await sh(`cd ${q(media)} 2>/dev/null && find . -type f ! -name '*.xbt' | sed 's|^\\./||'`)).split(/\r?\n/).map(x => x.trim().toLowerCase()).filter(Boolean));
+    let xb = null;
+    const icons = [];
+    for (const t of want) {
+      let buf = null;
+      if (loose.has(t.toLowerCase())) buf = (await exec(`cat ${q(media + '/' + t)}`, { timeout: 30000 })).out;
+      else {
+        if (!xb) { const o = (await exec(`cat ${q(media + '/Textures.xbt')} 2>/dev/null`, { timeout: 180000 })).out; xb = { buf: o, files: o.length > 16 ? xbt.parse(o) : new Map() }; }
+        try { buf = xbt.toPng(xb.buf, xb.files, t); } catch {}
+      }
+      if (buf && buf.length) icons.push({ tex: t, name: (btns.find(b => b.tex === t) || {}).name || '', src: `data:image/${/\.jpg$/i.test(t) ? 'jpeg' : 'png'};base64,${Buffer.from(buf).toString('base64')}` });
+    }
+    return (osdThumbCache[id] = { id, buttons: btns.length, icons });
+  },
   'skin:infoFields': () => Object.keys(skin.INFO_FIELDS),
   'skin:infoItems': async id => skin.infoItems((await readSkinXml(id)).files),
   'player:ppi': playerProcessInfo,
   'np:art': artData,
+  'clip:image': async dataUrl => { clipboard.writeImage(nativeImage.createFromDataURL(dataUrl)); return true; },
+  'nfo:export': nfoExport,
+  // every listening port on the box, what owns it, and clashes with the ports Kodi / this app are set to use
+  'ports:list': async () => {
+    const raw = await sh(`netstat -tulnp 2>/dev/null || netstat -tuln; echo ==GS; grep -E 'id="services\\.(webserverport|esport|esportrange|webserver|esallinterfaces|airplay|upnp|zeroconf)"' ${q(KH + '/userdata/guisettings.xml')} 2>/dev/null`, { timeout: 30000 });
+    const [ns, gs = ''] = raw.split('==GS');
+    const set = Object.fromEntries([...gs.matchAll(/id="services\.(\w+)"[^>]*>([^<]*)</g)].map(m => [m[1], m[2].trim()]));
+    const KNOWN = { 22: 'SSH', 111: 'RPC portmapper (NFS)', 137: 'NetBIOS name (Samba)', 138: 'NetBIOS datagram (Samba)', 139: 'Samba (SMB over NetBIOS)', 445: 'Samba (SMB)', 1900: 'UPnP / SSDP', 2049: 'NFS', 3702: 'WS-Discovery (Windows network browsing)', 5353: 'mDNS / Zeroconf (Avahi)', 5355: 'LLMNR name lookup', 9090: 'Kodi JSON-RPC (TCP)', 9777: 'Kodi EventServer (remotes)', 36666: 'Kodi AirTunes', 36667: 'Kodi AirPlay', 51515: 'Hyperion', 8888: 'Plugin proxy' };
+    const web = +set.webserverport || 8080, es = +set.esport || 9777, help = +cfg.conn.helperPort || 8099;
+    const expect = { [web]: { svc: 'Kodi web server / HTTP JSON-RPC', prog: 'kodi' }, 9090: { svc: 'Kodi JSON-RPC (TCP)', prog: 'kodi' }, [es]: { svc: 'Kodi EventServer (remotes)', prog: 'kodi' }, [help]: { svc: 'Kodi Control helper add-on', prog: 'kodi' } };
+    const rows = [];
+    for (const l of ns.split('\n')) {
+      const m = /^(tcp|udp)6?\s+\d+\s+\d+\s+(\S+):(\d+)\s+\S+\s+(?:LISTEN\s+)?(\S+)?/.exec(l.trim());
+      if (!m) continue;
+      const [, proto, addr, p, pp = ''] = m, port = +p, [pid, prog = ''] = pp.split('/');
+      rows.push({ proto, addr: addr === '::' || addr === '0.0.0.0' ? 'all' : addr, port, pid: /^\d+$/.test(pid) ? pid : '', prog, service: (expect[port] && /kodi/.test(prog) ? expect[port].svc : '') || KNOWN[port] || (/kodi/.test(prog) ? 'Kodi (add-on or service)' : port >= 32768 ? 'temporary (assigned by the system)' : '') });
+    }
+    // one line per port + protocol + program; IPv4 and IPv6 merged
+    const seen = new Map();
+    for (const r of rows) { const k = r.proto + r.port + r.prog; if (seen.has(k)) { const o = seen.get(k); if (!o.addr.split(', ').includes(r.addr)) o.addr += ', ' + r.addr; } else seen.set(k, { ...r }); }
+    const list = [...seen.values()].sort((a, b) => a.port - b.port || a.proto.localeCompare(b.proto));
+    const issues = [];
+    for (const [p, e] of Object.entries(expect)) {
+      const on = list.filter(r => r.port === +p && r.proto === (+p === es ? 'udp' : 'tcp'));
+      const other = on.filter(r => r.prog && !/kodi/.test(r.prog));
+      if (other.length) issues.push({ bad: true, text: `Port ${p} is meant for ${e.svc} but ${other.map(r => r.prog).join(', ')} holds it: change one of them` });
+      else if (!on.length && +p === help && cfg.conn.via === 'helper') issues.push({ bad: true, text: `The helper add-on should listen on ${p} but nothing does: Kodi may not have started it (restart Kodi, or reinstall it from Connection)` });
+      else if (!on.length && +p === web && set.webserver === 'true') issues.push({ bad: true, text: `Kodi's web server is on but nothing listens on ${p}: another program may have had the port when Kodi started` });
+      else if (!on.length && +p === 9090) issues.push({ bad: true, text: 'Nothing listens on 9090: turn on "Allow remote control from applications on this system" in Kodi' });
+    }
+    const local = list.filter(r => r.port === 9090 && /^(127\.|::1)/.test(r.addr));
+    if (local.length && !list.some(r => r.port === 9090 && r.addr.includes('all'))) issues.push({ bad: false, text: 'JSON-RPC 9090 only listens on the box itself: fine for this app (it goes through SSH); other apps on the network need "Allow remote control from applications on other systems"' });
+    const dup = {};
+    for (const r of list) { const k = r.proto + r.port; (dup[k] ||= new Set()).add(r.prog || '?'); }
+    for (const [k, progs] of Object.entries(dup)) if (progs.size > 1) issues.push({ bad: true, text: `${k.replace(/^(tcp|udp)/, '$1 ')} is open by more than one program: ${[...progs].join(', ')}` });
+    return { list, issues, settings: { web, es, helper: help } };
+  },
+  // Live view text: fills Kodi's on-screen keyboard (done = press OK), or reports whether one is open now
+  'kodi:sendText': async ({ text, done }) => { await rpc('Input.SendText', { text: String(text), done: !!done }); return true; },
+  'kodi:closeKeyboard': async () => { await rpc('Input.Back'); return true; },
+  'kodi:keyboardOpen': async () => {
+    const r = await rpc('XBMC.GetInfoLabels', { labels: ['System.CurrentWindow', 'Control.GetLabel(312)', 'Window(10103).Property(heading)'] }).catch(() => ({}));
+    const g = await rpc('GUI.GetProperties', { properties: ['currentwindow'] }).catch(() => null);
+    return { open: !!(g && g.currentwindow && g.currentwindow.id === 10103), title: (g && g.currentwindow && g.currentwindow.label) || r['System.CurrentWindow'] || '', value: r['Control.GetLabel(312)'] || '' };
+  },
   'zoom:set': async i => {
     const z = [1.0, 1.2, 1.35][i] || 1;
     const players = await rpc('Player.GetActivePlayers');
@@ -947,8 +1072,23 @@ app.whenReady().then(async () => {
     if (ssh) ssh.end();
     return app.exit(0);
   }
+  // menu bar: tools that open from any page; each item tells the page which tool to open
+  const tool = id => () => win && win.webContents.send('menu', id);
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { label: 'File', submenu: [{ label: 'Connection…', click: tool('page:conn') }, { label: 'Backups…', click: tool('page:backup') }, { type: 'separator' }, { role: 'quit' }] },
+    { label: 'Tools', submenu: [
+      { label: 'Make local NFO files…', accelerator: 'CmdOrCtrl+N', click: tool('nfo') },
+      { label: 'Screenshot tool…', accelerator: 'CmdOrCtrl+Shift+S', click: tool('shot') },
+      { label: 'Copy TV screenshot', accelerator: 'CmdOrCtrl+Shift+C', click: tool('shot:copy') },
+      { type: 'separator' },
+      { label: 'Type text into Kodi…', accelerator: 'CmdOrCtrl+T', click: tool('type') },
+      { label: 'Ports on the box', click: tool('ports') },
+    ] },
+    { label: 'View', submenu: [{ role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
+    { label: 'Help', submenu: [{ label: 'Kodi Control on GitHub', click: () => shell.openExternal('https://github.com/easter478/kodi-control') }] },
+  ]));
   win = new BrowserWindow({
-    width: 1360, height: 880, minWidth: 900, minHeight: 600, backgroundColor: '#0B1020', title: 'Kodi Control', autoHideMenuBar: true, show: !process.argv.includes('--shots'),
+    width: 1360, height: 880, minWidth: 900, minHeight: 600, backgroundColor: '#0B1020', title: 'Kodi Control', autoHideMenuBar: false, show: !process.argv.includes('--shots'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
   win.loadFile(path.join(__dirname, 'index.html'));

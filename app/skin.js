@@ -380,6 +380,7 @@ function importOsd(out, dirs, other, extra = {}) {
     .filter(r => !/^special:|\$/i.test(r));
   const tex = refs.filter(r => loose.has(r.toLowerCase()) || packed.has(r.toLowerCase()));
 
+  const scripts = new Set();
   const fix = x => {
     for (const [n, k] of Object.entries(ren.include)) {
       x = x.replace(new RegExp(`(<include(?:\\s+condition="[^"]*")?\\s*>\\s*)${reEsc(n)}(\\s*<\\/include>)`, 'g'), `$1${k}$2`)
@@ -390,10 +391,16 @@ function importOsd(out, dirs, other, extra = {}) {
     for (const [n, k] of Object.entries(ren.constant)) x = x.replace(rx(n), (m, pre) => pre + k);
     for (const [id, nid] of Object.entries(idMap)) {
       x = x.replace(new RegExp(`((?:ActivateWindow|ReplaceWindow|Dialog\\.Close|Window\\.Is\\w*|Window)\\()${id}\\b`, 'gi'), `$1${nid}`)
-        .replace(new RegExp(`(<window\\b[^>]*\\bid=")${id}"`, 'i'), `$1${nid}"`);
+        .replace(new RegExp(`(<window\\b[^>]*\\bid=")${id}"`, 'i'), `$1${nid}"`)
+        // window ids handed to includes (Bald's <param name="owner">1120</param>) and window arguments of
+        // SetProperty(k,v,1120) / ClearProperty(k,1120): left alone they point at the target's own window
+        .replace(new RegExp(`(<param\\s+name="[^"]*"(?:\\s+default="${id}"\\s*/>|\\s*>\\s*${id}\\s*</param>))`, 'gi'), m => m.replace(id, nid))
+        .replace(new RegExp(`((?:SetProperty|ClearProperty)\\([^()]*,\\s*)${id}\\)`, 'gi'), `$1${nid})`);
     }
     for (const m of tex) x = x.replace(texRe(m), (q, pre) => pre + KC_TEX + m);
     x = freezeSkinSettings(x, skinSet);
+    // the source's own Python scripts (Bald's zoom button runs special://skin/scripts/zoom.py): copy their folder
+    x = x.replace(/special:\/\/skin\/(?!media\/|extras\/kc\/|kcsrc\/)([\w.\-\/]+?\.py)\b/gi, (m, p) => { scripts.add(p.includes('/') ? p.replace(/\/[^/]*$/, '') : p); return 'special://skin/kcsrc/' + p; });
     // the source's skin strings (31000-31999) would otherwise show the target's text for the same number
     return x.replace(/\$LOCALIZE\[(3\d{4})\]/g, (m, n) => strings[n] != null ? strings[n] : m)
       .replace(/(<(label|label2|hinttext)>)\s*(3\d{4})\s*(<\/\2>)/gi, (m, o, t, n, c) => strings[n] != null ? o + strings[n] + c : m);
@@ -424,7 +431,8 @@ function importOsd(out, dirs, other, extra = {}) {
   if (colors.length && tgtColorKey) out[tgtColorKey] = out[tgtColorKey].replace(/<\/colors>/i, colors.map(n => `\t<color name="${n}">${srcColors[n]}</color>`).join('\n') + '\n</colors>');
   const fontFiles = [...new Set(fonts.map(n => (/<filename>([^<]+)<\/filename>/i.exec(srcFonts[n]) || [])[1]).filter(Boolean))];
   const assets = [...tex.map(m => loose.has(m.toLowerCase()) ? { from: 'media/' + m, to: 'media/' + KC_TEX + m } : { xbt: m, to: 'media/' + KC_TEX + m }),
-    ...fontFiles.map(f => ({ from: 'fonts/' + f, to: 'fonts/' + f }))];
+    ...fontFiles.map(f => ({ from: 'fonts/' + f, to: 'fonts/' + f })),
+    ...[...scripts].map(s => ({ from: s, to: 'kcsrc/' + s, dir: !/\.py$/i.test(s) }))];
 
   const nRen = TAGS.reduce((n, t) => n + Object.keys(ren[t]).length, 0);
   const parts = [`OSD moved over: ${Object.keys(wins).join(', ')}; ${plural(nDefs, 'definition')}, ${plural(fonts.length, 'font')}, ${plural(colors.length, 'colour')}, ${plural(tex.length, 'texture')}`];
@@ -812,7 +820,7 @@ function osdButtons(files, strings = {}) {
     const clicks = [...block.matchAll(/<onclick\b[^>]*>([^<]*)<\/onclick>/gi)].map(x => x[1].trim()).filter(Boolean);
     const tex = tag('texturenofocus') || tag('texturefocus');
     rows.push({ id, kind, name: /HiddenObject/.test(block) ? 'Hidden seek / step control' : osdName(block, strings), section: osdSection(inc || '', block), label: tag('label').replace(GLYPH, '').replace(/\$LOCALIZE\[(\d+)\]/g, (_, n) => strings[n] || 'string ' + n),
-      onclick: clicks.join(' ; '), visible: tag('visible'), texture: base(tex || ''), file: base(k), include: inc || '' });
+      onclick: clicks.join(' ; '), visible: tag('visible'), texture: base(tex || ''), tex: tex || '', file: base(k), include: inc || '' });
   };
   for (const { k, span, name: inc } of ps) {
     // commented-out buttons (Nimbus keeps a whole old OSD in a comment) are not buttons
@@ -912,6 +920,65 @@ function zoomIntoGrouplist(x, font, from = 0, to = x.length) {
     }
   }
   return null;
+}
+// Zoom preset in place of an existing OSD button (default the Info button): the button keeps its spot, focus
+// order and style, its actions become the zoom cycle and its icon the skin's own zoom icon when it has one.
+// Template buttons (Bald: <include content="Bald_OSDButton"><param name="id">70043</param>) lose the actions
+// passed to them, and so do the wrappers that call their definition (Bald_OSDSlot_Real_Info opens the info
+// panel from <onfocus>), up to two levels out.
+const ZOOM_CLICK = '<onclick>RunScript(script.kodicontrol,zoom)</onclick>';
+const ACT_TAGS = /<(onclick|altclick|onfocus|onunfocus|onup)\b[^>]*>[\s\S]*?<\/\1>\s*/gi;
+function zoomIcon(all) {
+  for (const c of templateCalls(all)) if (/zoom/i.test(c.body) && (c.p.icon || c.p.texture)) return c.p.icon || c.p.texture;
+  const m = /<control\s+type="(?:radio|toggle)?button"[^>]*>(?:(?!<\/control>)[\s\S])*?zoom(?:(?!<\/control>)[\s\S])*?<texturenofocus[^>]*>([^<$]+\.png)<\/texturenofocus>/i.exec(all);
+  return m ? m[1] : '';
+}
+function replaceWithZoom(out, files, id) {
+  id = String(id);
+  const all = files.map(k => out[k]).join('\n');
+  const icon = zoomIcon(all);
+  let n = 0;
+  const wrapNames = new Set();
+  for (const k of files) {
+    let x = out[k];
+    x = x.replace(BTN_RE(), block => {
+      if ((/\sid\s*=\s*"(\d+)"/i.exec(block) || [])[1] !== id || /kodicontrol: zoom/.test(block)) return block;
+      n++;
+      let b = block.replace(ACT_TAGS, '').replace(/(<control\b[^>]*>)/i, `$1<!-- kodicontrol: zoom -->${ZOOM_CLICK}`);
+      if (icon) b = b.replace(/(<texture(?:no)?focus\b[^>]*>)([^<]*info[^<]*)(<\/texture(?:no)?focus>)/gi, `$1${icon}$3`);
+      return b;
+    });
+    for (const c of templateCalls(x).reverse()) {
+      if (c.p.id !== id || /kodicontrol: zoom/.test(c.body)) continue;
+      const start = /^<include\b[^>]*>/i.exec(c.body)[0];
+      let body = c.body.slice(start.length).replace(ACT_TAGS, '');
+      if (icon) for (const k2 of ['icon', 'on', 'texture', 'icon_on', 'icon_off']) body = body.replace(new RegExp(`(<param\\s+name="${k2}"\\s*>)[^<]*(</param>)`, 'i'), `$1${icon}$2`);
+      x = x.slice(0, c.at) + start + '<!-- kodicontrol: zoom -->' + ZOOM_CLICK + body + x.slice(c.end);
+      n++;
+      // the definition this call sits in: its callers may pass panel-opening actions in
+      const def = [...x.slice(0, c.at).matchAll(/<include\s+name="([^"]+)"[^>]*>/gi)].pop();
+      if (def && balancedEnd(x, def.index, 'include') > c.at) wrapNames.add(def[1]);
+    }
+    out[k] = x;
+  }
+  for (let lvl = 0; lvl < 2 && wrapNames.size; lvl++) {
+    const next = new Set();
+    for (const k of files) {
+      let x = out[k];
+      for (const m of [...x.matchAll(/<include\s+content="([^"]+)"[^>]*>/gi)].reverse()) {
+        if (!wrapNames.has(m[1])) continue;
+        const end = balancedEnd(x, m.index, 'include');
+        if (end < 0) continue;
+        const call = x.slice(m.index, end), cleaned = call.replace(ACT_TAGS, '');
+        if (cleaned !== call) x = x.slice(0, m.index) + cleaned + x.slice(end);
+        const def = [...x.slice(0, m.index).matchAll(/<include\s+name="([^"]+)"[^>]*>/gi)].pop();
+        if (def && balancedEnd(x, def.index, 'include') > m.index) next.add(def[1]);
+      }
+      out[k] = x;
+    }
+    wrapNames.clear(); for (const w of next) wrapNames.add(w);
+  }
+  return n;
 }
 function addZoom(out, fontOf) {
   const k = Object.keys(out).find(f => /^VideoOSD\.xml$/i.test(base(f)));
@@ -1111,7 +1178,11 @@ function applyAll(files, t, opts = {}) {
     const n = osdPatch(out, osdClear, OSD_FILE);
     add(n > 0, n ? `OSD transparent: ${plural(n, 'background image')} cleared, buttons kept` : 'OSD transparent: no static background images found');
   }
-  if (t.osdZoom) {
+  if (t.osdZoom && t.zoomReplace) {
+    const files = [...new Set(osdParts(out, OSD_FILE).map(p => p.k))];
+    const n = replaceWithZoom(out, files, t.zoomReplace);
+    add(n > 0, n ? `OSD zoom preset: put in place of button ${t.zoomReplace}${t.zoomReplaceName ? ` (${t.zoomReplaceName})` : ''}` : `OSD zoom preset: button ${t.zoomReplace} was not found in this OSD (did the OSD source change?); pick the button again`);
+  } else if (t.osdZoom) {
     const r = addZoom(out, fontOf);
     add(r.n > 0 || r.note === 'already present', `OSD zoom button: ${r.note}`);
   }
