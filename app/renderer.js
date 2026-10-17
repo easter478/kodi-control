@@ -1236,7 +1236,7 @@ function skLoadT() {
   const l = SK.look;
   $('skPlace').value = l.place || 'follow'; $('skSize').value = l.size || 'medium';
   $('skBot').value = l.bottom || 230; $('skColor').value = l.color || 'FFFFFFFF'; skDemo();
-  $('skOn').classList.toggle('on', !!SK.on); $('skRam').classList.toggle('on', !!SK.ram);
+  $('skOn').classList.toggle('on', !!SK.on); $('skRam').classList.toggle('on', !!SK.ram); $('skSubs').classList.toggle('on', SK.hidesubs !== false);
   $('skOpts').style.display = SK.on ? '' : 'none';
 }
 function skDemo() {
@@ -1248,14 +1248,14 @@ function skDemo() {
 }
 ['skPlace', 'skSize', 'skBot', 'skColor'].forEach(id => $(id).oninput = $(id).onchange = () => skDemo());
 $('skDelay').oninput = () => { $('skDelayV').textContent = $('skDelay').value + ' ms'; };
-const skValues = () => ({ on: $('skOn').classList.contains('on'), look: { place: $('skPlace').value, size: $('skSize').value, bottom: +$('skBot').value, color: $('skColor').value }, ram: $('skRam').classList.contains('on'), step: +$('skStep').value, width: { small: 288, medium: 384, large: 512 }[$('skSize').value] || 384, delay: +$('skDelay').value, steps: $('skSteps').value ? $('skSteps').value.split(',').map(Number) : null });
+const skValues = () => ({ on: $('skOn').classList.contains('on'), look: { place: $('skPlace').value, size: $('skSize').value, bottom: +$('skBot').value, color: $('skColor').value }, ram: $('skRam').classList.contains('on'), hidesubs: $('skSubs').classList.contains('on'), step: +$('skStep').value, width: { small: 288, medium: 384, large: 512 }[$('skSize').value] || 384, delay: +$('skDelay').value, steps: $('skSteps').value ? $('skSteps').value.split(',').map(Number) : null });
 async function skCheck(btn) {
   if (!S.connected) return;
   const go = async () => {
     const s = await call('seek:status');
     $('skFf').innerHTML = s.ffmpeg ? `<span class="tag ok">found</span> <span class="mono">${esc(s.ffmpeg)}</span>` : '<span class="tag warn">not installed</span>';
     $('skInstall').style.display = s.ffmpeg ? 'none' : '';
-    SK = { on: s.on, look: s.look, ram: s.ram }; skLoadT();
+    SK = { on: s.on, look: s.look, ram: s.ram, hidesubs: s.hidesubs }; skLoadT();
     if (s.conf.step) $('skStep').value = s.conf.step;
     if (s.delay != null) { $('skDelay').value = s.delay; $('skDelayV').textContent = s.delay + ' ms'; }
     if (Array.isArray(s.steps)) { const v = s.steps.join(','); if (![...$('skSteps').options].some(o => o.value === v)) $('skSteps').insertAdjacentHTML('afterbegin', `<option value="${v}">Now: ${esc(s.steps.join(', '))} s</option>`); $('skSteps').value = v; }
@@ -1282,6 +1282,7 @@ $('skOn').onclick = () => {
     finally { skCheck(); }
   });
 };
+$('skSubs').onclick = () => $('skSubs').classList.toggle('on');
 $('skRam').onclick = () => needConn() && act(null, async () => { const on = $('skRam').classList.toggle('on'); toast(await call('seek:ram', on)); });
 // zoom values: shown as the amount added (0.20 = Kodi zoom 1.2), edited here and baked into the helper add-on
 let ZV = [0, 0.2, 0.35];

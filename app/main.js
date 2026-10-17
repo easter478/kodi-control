@@ -334,13 +334,24 @@ def source(f):
         PROXY['files'][tok] = url
         return 'http://127.0.0.1:%d/%s' % (proxy(), tok), ''
     return None, ''
+SUBS = {'hidden': False}
 def clear():
     home.clearProperty('kodicontrol.seekthumb'); home.clearProperty('kodicontrol.seekslot')
+    if SUBS['hidden']:
+        SUBS['hidden'] = False
+        try: xbmc.Player().showSubtitles(True)
+        except Exception: pass
+def hideSubs(c):
+    if SUBS['hidden'] or not c.get('hidesubs', True): return
+    if xbmc.getCondVisibility('VideoPlayer.SubtitlesEnabled'):
+        try: xbmc.Player().showSubtitles(False); SUBS['hidden'] = True
+        except Exception: pass
 
 class Frames(threading.Thread):
     def __init__(self, url, hdr, key, step, width):
         threading.Thread.__init__(self); self.daemon = True
         self.url, self.hdr, self.step, self.width = url, hdr, step, width
+        self.height = width * 9 // 16 // 2 * 2
         self.dir = os.path.join(TMP, key); os.makedirs(self.dir, exist_ok=True)
         self.want, self.around, self.dur, self.stop, self.bad = None, 0, 0, False, 0
         self.remote = not url.startswith('/')
@@ -351,7 +362,7 @@ class Frames(threading.Thread):
         if os.path.exists(p) or self.bad > 5: return
         cmd = ['nice', '-n', '15', ffmpeg(), '-nostdin', '-loglevel', 'error']
         if self.hdr: cmd += ['-headers', self.hdr]
-        cmd += ['-ss', str(b), '-noaccurate_seek', '-i', self.url, '-frames:v', '1', '-an', '-sn', '-threads', '1', '-vf', 'scale=%d:-2' % self.width, '-q:v', '5', '-y', p + '.tmp.jpg']
+        cmd += ['-ss', str(b), '-noaccurate_seek', '-i', self.url, '-frames:v', '1', '-an', '-sn', '-threads', '1', '-vf', 'scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d' % (self.width, self.height, self.width, self.height), '-q:v', '5', '-y', p + '.tmp.jpg']
         try:
             subprocess.run(cmd, timeout=20, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if os.path.exists(p + '.tmp.jpg') and os.path.getsize(p + '.tmp.jpg') > 0: os.replace(p + '.tmp.jpg', p); self.bad = 0
@@ -403,7 +414,7 @@ while not mon.abortRequested():
         clear()
         url, hdr = source(f)
         if url and ffmpeg():
-            key = hashlib.md5(f.encode('utf8', 'replace')).hexdigest()[:16]
+            key = hashlib.md5(('v2:%d:' % int(c.get('width', 384)) + f).encode('utf8', 'replace')).hexdigest()[:16]
             gen = Frames(url, hdr, key, max(2, int(c.get('step', 10))), max(160, int(c.get('width', 384))))
             try: gen.dur = int(player.getTotalTime()); gen.around = int(player.getTime())
             except Exception: pass
@@ -419,7 +430,7 @@ while not mon.abortRequested():
             # show the asked-for frame, or the nearest one made so far while it is being made
             for d in range(0, 900, gen.step):
                 hit = [x for x in (b - d, b + d) if x >= 0 and os.path.exists(gen.path(x))]
-                if hit: home.setProperty('kodicontrol.seekthumb', gen.path(hit[0])); break
+                if hit: home.setProperty('kodicontrol.seekthumb', gen.path(hit[0])); hideSubs(c); break
             if gen.dur: home.setProperty('kodicontrol.seekslot', str(max(0, min(SLOTS, int(round(t * SLOTS / float(gen.dur)))))))
             last = now
     elif last and now - last > 0.4:
@@ -682,14 +693,14 @@ async function seekEverywhere() {
   }
   return lines;
 }
-async function seekEnable({ on, step, width, delay, steps, look, ram }) {
+async function seekEnable({ on, step, width, delay, steps, look, ram, hidesubs }) {
   if (!on) {
     const msg = await seekDefault();
     cfg.seek = { on: false }; saveCfg();
     const lines = await seekEverywhere();
     return { report: [{ ok: true, text: msg }, ...lines] };
   }
-  const notes = await handlers['seek:save']({ on: true, step, width, delay, steps, ram });
+  const notes = await handlers['seek:save']({ on: true, step, width, delay, steps, ram, hidesubs });
   cfg.seek.look = { ...SEEK_LOOK, ...(look || {}) }; saveCfg();
   return { report: [{ ok: true, text: 'Seek preview on: ' + notes }, ...(await seekEverywhere())] };
 }
@@ -1332,7 +1343,13 @@ async function applySkin(id, t, { reload = true } = {}) {
 
   const extras = {};
   if (t.posters) { extras['extras/kc/mask.png'] = png.roundedMask(+t.radius || 12); extras['extras/kc/mask_wide.png'] = png.roundedMask(+t.radius || 12, 640, 360); }
-  if (t.seekPreview) { if (!extras['extras/kc/mask_wide.png']) extras['extras/kc/mask_wide.png'] = png.roundedMask(+t.radius || 12, 640, 360); extras['extras/kc/white.png'] = png.white(); }
+  if (t.seekPreview) {
+    const b = skin.seekBox(t);
+    // drawn at the box's real size: the frame's corners and the picture's (smaller, inset) corners line up evenly
+    extras['extras/kc/seek_o.png'] = png.roundedMask(b.r * 200 / b.bw, b.bw, b.bh);
+    extras['extras/kc/seek_i.png'] = png.roundedMask(Math.max(0, b.r - b.pad) * 200 / b.w, b.w, b.h);
+    extras['extras/kc/white.png'] = png.white();
+  }
   if ((t.bgs && t.bgs.some(b => +b.dim)) || (t.fullArt && t.fullArtMode === 'top')) extras['extras/kc/white.png'] = png.white();
   if (t.fullArt && t.fullArtMode === 'top') extras['extras/kc/fade_v.png'] = png.fadeV();
   if (t.glass) extras['extras/kc/glass.png'] = png.glass();
@@ -1581,7 +1598,7 @@ const handlers = {
     const conf = (await sh(`cat ${q(KH + '/userdata/addon_data/script.kodicontrol/seek.json')} 2>/dev/null`)).trim();
     const [delay, steps] = await Promise.all(['videoplayer.seekdelay', 'videoplayer.seeksteps'].map(s => rpc('Settings.GetSettingValue', { setting: s }).then(r => r.value).catch(() => null)));
     let c = {}; try { c = JSON.parse(conf); } catch {}
-    return { ffmpeg: ff, conf: c, delay, steps, on: !!(cfg.seek && cfg.seek.on), look: { ...SEEK_LOOK, ...((cfg.seek || {}).look || {}) }, ram: !!c.ram, cached: (await sh(`du -sk ${q(KH + '/temp/kcseek')} /tmp/kcseek 2>/dev/null | awk '{s+=$1} END {print s+0}'`)).trim() };
+    return { ffmpeg: ff, conf: c, delay, steps, on: !!(cfg.seek && cfg.seek.on), look: { ...SEEK_LOOK, ...((cfg.seek || {}).look || {}) }, ram: !!c.ram, hidesubs: c.hidesubs !== false, cached: (await sh(`du -sk ${q(KH + '/temp/kcseek')} /tmp/kcseek 2>/dev/null | awk '{s+=$1} END {print s+0}'`)).trim() };
   },
   'seek:installFfmpeg': async () => {
     if (!ssh) throw new Error('Not connected');
@@ -1589,9 +1606,9 @@ const handlers = {
     if (!(cfg.installed ||= []).includes('tools.ffmpeg-tools')) { cfg.installed.push('tools.ffmpeg-tools'); saveCfg(); }
     return 'Kodi is asking on the TV to install "FFmpeg Tools" from the CoreELEC repository. Confirm there, then press Check again.';
   },
-  'seek:save': async ({ on, step, width, delay, steps, ram, look }) => {
+  'seek:save': async ({ on, step, width, delay, steps, ram, look, hidesubs }) => {
     if (!ssh) throw new Error('Not connected');
-    const c = { on: !!on, step: Math.max(2, Math.min(60, +step || 10)), width: Math.max(160, Math.min(640, +width || 384)), ram: ram === undefined ? !!(cfg.seek && cfg.seek.ram) : !!ram };
+    const c = { on: !!on, step: Math.max(2, Math.min(60, +step || 10)), width: Math.max(160, Math.min(640, +width || 384)), ram: ram === undefined ? !!(cfg.seek && cfg.seek.ram) : !!ram, hidesubs: hidesubs === undefined ? !(cfg.seek && cfg.seek.hidesubs === false) : !!hidesubs };
     if (!cfg.seekOrig) {
       const [d0, s0] = await Promise.all(['videoplayer.seekdelay', 'videoplayer.seeksteps'].map(k => rpc('Settings.GetSettingValue', { setting: k }).then(r => r.value).catch(() => null)));
       if (d0 != null) cfg.seekOrig = { delay: d0, steps: s0 || SEEK_DEFAULT.steps };

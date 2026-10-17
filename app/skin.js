@@ -1065,15 +1065,21 @@ function bgControls(b, cond, w, h) {
 // Window(Home).Property(kodicontrol.seekthumb) at it; kodicontrol.seekslot (0..SEEK_SLOTS) says how far along
 // the bar the target is, so the box can follow it. Plain textures (no border=, masked like the posters).
 const SEEK_SLOTS = 40;
+// the preview box: picture w×h (16:9, as the frames are made), frame pad px around it, corner radius r
+function seekBox(t) {
+  const w = { small: 288, medium: 384, large: 512 }[t.seekSize] || 384, h = Math.floor(w * 9 / 16 / 2) * 2, pad = 6;
+  return { w, h, pad, bw: w + pad * 2, bh: h + pad * 2, r: 14 };
+}
+const SEEK_O = 'special://skin/extras/kc/seek_o.png', SEEK_I = 'special://skin/extras/kc/seek_i.png';
 function seekPreviewBlock(t, W, H, font, bar, only = '') {
-  const w = { small: 288, medium: 384, large: 512 }[t.seekSize] || 384, h = Math.round(w * 9 / 16), pad = 6;
+  const { w, h, pad } = seekBox(t);
   const bw = w + pad * 2, top = Math.max(0, H - (+t.seekBottom || 230) - h - pad * 2 - 44);
   const P = 'Window(Home).Property(kodicontrol.seek';
   const box = (left, vis) => `<control type="group"><!-- kodicontrol: seek preview -->
     <left>${left}</left><top>${top}</top><width>${bw}</width><height>${h + pad * 2 + 44}</height>
     <visible>!String.IsEmpty(${P}thumb))${vis ? ' + ' + vis : ''}${only ? ' + ' + only : ''}</visible>
-    <control type="image"><left>0</left><top>0</top><width>${bw}</width><height>${h + pad * 2}</height><texture colordiffuse="${t.seekColor || 'FFFFFFFF'}" diffuse="${MASK_WIDE}">${WHITE}</texture></control>
-    <control type="image"><left>${pad}</left><top>${pad}</top><width>${w}</width><height>${h}</height><aspectratio>scale</aspectratio><texture diffuse="${MASK_WIDE}">$INFO[${P}thumb)]</texture></control>
+    <control type="image"><left>0</left><top>0</top><width>${bw}</width><height>${h + pad * 2}</height><texture colordiffuse="${t.seekColor || 'FFFFFFFF'}" diffuse="${SEEK_O}">${WHITE}</texture></control>
+    <control type="image"><left>${pad}</left><top>${pad}</top><width>${w}</width><height>${h}</height><aspectratio>stretch</aspectratio><texture diffuse="${SEEK_I}">$INFO[${P}thumb)]</texture></control>
     <control type="label"><left>0</left><top>${h + pad * 2 + 4}</top><width>${bw}</width><height>40</height><align>center</align><aligny>center</aligny><font>${font}</font><textcolor>FFFFFFFF</textcolor><shadowcolor>FF000000</shadowcolor><label>$INFO[Player.SeekTime]$INFO[Player.Duration, / ]</label></control>
   </control>`;
   if (t.seekPlace === 'center') return box(Math.round((W - bw) / 2));
@@ -1330,4 +1336,4 @@ function filterMenu(xml, keep) {
   });
 }
 
-module.exports = { osdFiles, infoItems, applyAll, animInventory, winAnimInventory, osdButtons, osdName, parsePo, INFO_FIELDS, parseMenu, filterMenu, BG_TARGETS, emptyWindow };
+module.exports = { seekBox, osdFiles, infoItems, applyAll, animInventory, winAnimInventory, osdButtons, osdName, parsePo, INFO_FIELDS, parseMenu, filterMenu, BG_TARGETS, emptyWindow };
