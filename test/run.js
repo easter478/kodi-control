@@ -480,6 +480,58 @@ const AEON = {
     await t['font:cjk'](false); eq(font, 'Default'); eq(Object.keys(c.fontOrig).length, 0);
   });
 
+  await test('auto zoom: bar maths and ffmpeg cropdetect parsing in the helper service (python)', async () => {
+    const py = ['python3', 'python'].find(p => { try { return require('child_process').spawnSync(p, ['-c', 'print(1)']).status === 0; } catch { return false; } });
+    if (!py) return; // no python on this PC: nothing to run the helper with
+    const src = fs.readFileSync(path.join(__dirname, '../app/main.js'), 'utf8').match(/const SEEK_PY = String\.raw`([\s\S]*?)`;/)[1];
+    const top = src.slice(0, src.indexOf('mon, player = xbmc.Monitor()'));
+    const harness = String.raw`
+import sys, types, json
+class W:
+    def __init__(self, *a): self.p = {}
+    def setProperty(self, k, v): self.p[k] = v
+    def getProperty(self, k): return self.p.get(k, '')
+    def clearProperty(self, k): self.p.pop(k, None)
+LABELS = {'System.ScreenWidth': '3840', 'System.ScreenHeight': '2160'}
+xbmc = types.ModuleType('xbmc'); xbmc.getInfoLabel = lambda k: LABELS.get(k, ''); xbmc.executeJSONRPC = lambda s: '{"result": {}}'
+xbmcgui = types.ModuleType('xbmcgui'); xbmcgui.Window = W
+xbmcvfs = types.ModuleType('xbmcvfs'); xbmcvfs.translatePath = lambda p: '/nonexistent/' + p.split('/')[-1]
+sys.modules.update(xbmc=xbmc, xbmcgui=xbmcgui, xbmcvfs=xbmcvfs)
+exec(compile(open(sys.argv[1], encoding='utf8').read(), 'service', 'exec'))
+out = {}
+scope = {'F': 16 / 9.0, 'cw': 1, 'ch': 1600 / 2160.0, 'ox': 0, 'oy': 0}
+out['remux 2.40 in 16:9'] = round(az_zoom(scope, 'fill', 2), 3)
+out['encode cropped 2.40'] = round(az_zoom({'F': 2.4, 'cw': 1, 'ch': 1, 'ox': 0, 'oy': 0}, 'fill', 2), 3)
+out['capped at max'] = round(az_zoom(scope, 'fill', 1.2), 3)
+out['4:3 fill'] = round(az_zoom({'F': 4 / 3.0, 'cw': 1, 'ch': 1, 'ox': 0, 'oy': 0}, 'fill', 2), 3)
+out['4:3 bars only'] = round(az_zoom({'F': 4 / 3.0, 'cw': 1, 'ch': 1, 'ox': 0, 'oy': 0}, 'bars', 2), 3)
+out['scope inside 4:3 DVD'] = round(az_zoom({'F': 4 / 3.0, 'cw': 1, 'ch': 0.558, 'ox': 0, 'oy': 0}, 'bars', 2), 3)
+out['off-centre picture'] = round(az_zoom({'F': 16 / 9.0, 'cw': 1, 'ch': 0.74, 'ox': 0, 'oy': 0.02}, 'fill', 2), 3)
+out['flat 16:9 untouched'] = az_zoom({'F': 16 / 9.0, 'cw': 1, 'ch': 1, 'ox': 0, 'oy': 0}, 'fill', 2)
+job = AutoZoom('/films/x.mkv', {}, False)
+err = '''Input #0, matroska,webm, from '/films/x.mkv':
+  Stream #0:0(eng): Video: hevc (Main 10), yuv420p10le(tv, bt2020nc/bt2020/smpte2084), 3840x2160 [SAR 1:1 DAR 16:9], 23.98 fps
+[Parsed_cropdetect_0 @ 0x1] x1:0 x2:3839 y1:282 y2:1877 w:3840 h:1596 x:0 y:282 pts:0 t:0.000 limit:0.100 crop=3840:1596:0:282
+[Parsed_cropdetect_0 @ 0x1] x1:0 x2:3839 y1:280 y2:1879 w:3840 h:1600 x:0 y:280 pts:1 t:1.000 limit:0.100 crop=3840:1600:0:280
+'''
+globals()['ffrun'] = lambda a, j, secs=25: err
+s = job.sample('/films/x.mkv', '', 100)
+out['sample A'] = round(s['A'], 2); out['sample oy'] = round(s['oy'], 4)
+globals()['ffrun'] = lambda a, j, secs=25: err.replace('crop=3840:1600:0:280', 'crop=3840:200:0:900')
+out['black frame ignored'] = job.sample('/films/x.mkv', '', 100)
+print(json.dumps(out))
+`;
+    const f1 = path.join(ROOT, 'service_top.py'), f2 = path.join(ROOT, 'harness.py');
+    fs.writeFileSync(f1, top); fs.writeFileSync(f2, harness);
+    const r = require('child_process').spawnSync(py, [f2, f1], { encoding: 'utf8' });
+    ok(r.status === 0, r.stderr.slice(-600));
+    const o = JSON.parse(r.stdout.trim().split('\n').pop());
+    eq(o['remux 2.40 in 16:9'], 1.35); eq(o['encode cropped 2.40'], 1.35); eq(o['capped at max'], 1.2);
+    eq(o['4:3 fill'], 1.333); eq(o['4:3 bars only'], 1); eq(o['scope inside 4:3 DVD'], 1.792);
+    ok(o['off-centre picture'] > 1.35 + 0.05, 'an off-centre picture needs a bit more zoom to cover both bars');
+    eq(o['flat 16:9 untouched'], 1); eq(o['sample A'], 2.4); eq(o['sample oy'], 0); eq(o['black frame ignored'], null);
+  });
+
   console.log(results.join('\n'));
   console.log(`\n${pass} passed, ${fail} failed`);
   fs.rmSync(ROOT, { recursive: true, force: true });

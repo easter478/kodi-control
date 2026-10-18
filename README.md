@@ -77,10 +77,16 @@ All addresses, playlist links and logins in these pictures are dummy values.
   - Make local NFO files: next to the media on the box (Kodi's library export), or into a folder on this PC.
   - Screenshot tool (Ctrl+Shift+S) and Copy TV screenshot (Ctrl+Shift+C).
   - Type text into Kodi (Ctrl+T).
+  - Auto zoom, no black bars (Ctrl+B). When a film starts, the helper on the box decodes about ten keyframes spread through it with ffmpeg (cropdetect), finds where the picture ends and the bars begin, and sets Kodi's zoom so the picture covers the screen (2.39:1 on a 16:9 TV = 1.34×).
+    - It reads the picture itself, so it works for remuxes (bars inside a 16:9 frame) and HDR / Dolby Vision files. Black Bars Never and similar add-ons can't read those, because the screen grabs they rely on come out black.
+    - Choose between filling the whole screen and removing only the top and bottom bars, set a maximum zoom, and turn the on-screen note on or off.
+    - Each film is measured once and remembered. Live streams fall back to the frame shape Kodi reports. Pressing the zoom button yourself always wins.
+    - ffmpeg runs with the same limits as the seek preview: one decoder thread, keyframes only, low priority, waits while memory is short, and is the first thing killed if memory runs out.
+    - Needs the FFmpeg Tools add-on for remuxes. Switching it off (here or under Add-ons → Changes) puts the playing film back to normal size.
   - Check for updates (also in the Help menu): compares this .exe with the one on the GitHub release by its sha256 checksum, shows what changed, then downloads it, checks it and swaps it in on restart. It also looks once, quietly, a few seconds after start-up.
 - **84 app themes.**
 - **Default / Undo everywhere.** Every tab has a Default button: Skin tweaks, OSD themes, zoom values, seek preview, Live view, Keymaps, Keymap Editor settings, Media artwork, IPTV settings, Themes and the stats helper.
-  - Add-ons → **Changes Kodi Control made on the box** lists everything the app installed or changed. Each item has an on/off switch where it can be switched (the helper, the stats helper, FFmpeg Tools, the seek preview, the frame cache, each skin's patched files), or a Remove / Put back button.
+  - Add-ons → **Changes Kodi Control made on the box** lists everything the app installed or changed. Each item has an on/off switch where it can be switched (the helper, the stats helper, FFmpeg Tools, auto zoom, the seek preview, the frame cache, each skin's patched files), or a Remove / Put back button.
   - Removing a repository add-on such as FFmpeg Tools keeps a copy inside Kodi Control, so switching it back on needs no download.
   - The SSH and OSD pages show which helper add-on they mean, whether it is installed and enabled, and a switch for it.
   - Heavy features (seek preview, live video, "as fast as possible", key learning, FFmpeg Tools and System Tools installs) ask before they start.

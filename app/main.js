@@ -219,12 +219,12 @@ async function builtin(cmd) {
 
 // ---------- helper add-on ----------
 const HELPER_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<addon id="script.kodicontrol" name="Kodi Control helper" version="1.2.2" provider-name="Kodi Control">
+<addon id="script.kodicontrol" name="Kodi Control helper" version="1.3.0" provider-name="Kodi Control">
   <requires><import addon="xbmc.python" version="3.0.0"/></requires>
   <extension point="xbmc.python.script" library="default.py"/>
   <extension point="xbmc.service" library="service.py" start="login"/>
   <extension point="xbmc.addon.metadata">
-    <summary lang="en_GB">Zoom presets, seek preview and helpers used by Kodi Control</summary>
+    <summary lang="en_GB">Zoom presets, auto zoom, seek preview and helpers used by Kodi Control</summary>
     <platform>all</platform>
   </extension>
 </addon>
@@ -232,7 +232,7 @@ const HELPER_XML = `<?xml version="1.0" encoding="UTF-8"?>
 // zoom presets as the user sees them (0 = off, 0.20 = Kodi zoom 1.2); edited on the OSD page, baked into the helper
 const zoomList = () => { const z = (Array.isArray(cfg.zoom) ? cfg.zoom : [0, 0.2, 0.35]).map(Number).filter(v => isFinite(v) && v >= 0 && v <= 1); return z.length ? z : [0]; };
 const zoomName = v => v === 0 ? '0' : v.toFixed(2);
-const helperPy = () => `import sys, json, xbmc, xbmcgui
+const helperPy = () => `import sys, json, time, xbmc, xbmcgui
 PRESETS = [${zoomList().map(v => (1 + v).toFixed(3)).join(', ')}]
 NAMES = [${zoomList().map(v => `'${zoomName(v)}'`).join(', ')}]
 home = xbmcgui.Window(10000)
@@ -262,6 +262,9 @@ if cmd == 'zoom':
     setzoom((current() + 1) % len(PRESETS))
 elif cmd.startswith('zoom='):
     setzoom(max(0, min(len(PRESETS) - 1, int(cmd[5:]))))
+elif cmd == 'autozoom':
+    # measure the playing film again (the service watches this property)
+    home.setProperty('kodicontrol.azreq', str(time.time()))
 elif cmd == 'builtin' and len(args) > 1:
     xbmc.executebuiltin(','.join(args[1:]))
 `;
@@ -409,12 +412,152 @@ def tidy(keep):
             if os.path.basename(d) != keep: shutil.rmtree(d, True)
     except Exception: pass
 
+# Auto zoom: measures the black bars in the film itself (ffmpeg cropdetect on a few keyframes spread over it),
+# so it works for remuxes whose bars are part of the picture, and HDR/Dolby Vision ones that Kodi can't screen-grab.
+# Then it zooms just enough that the picture covers the screen. The result is kept per file, so a film is measured once.
+AZCFG = xbmcvfs.translatePath('special://profile/addon_data/script.kodicontrol/autozoom.json')
+AZCACHE = xbmcvfs.translatePath('special://profile/addon_data/script.kodicontrol/autozoom-cache.json')
+AZ = {'job': None, 'file': None, 'req': ''}
+def jload(p):
+    try:
+        with open(p) as f: return json.load(f)
+    except Exception: return {}
+def jsave(p, v):
+    try:
+        with open(p + '.tmp', 'w') as f: json.dump(v, f)
+        os.replace(p + '.tmp', p)
+    except Exception: pass
+def krpc(method, params):
+    try: return json.loads(xbmc.executeJSONRPC(json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params}))).get('result')
+    except Exception: return None
+def ffrun(args, job, secs=25):
+    # same care as the seek frames: nice, killed first if memory runs out, stopped with the service
+    cmd = ['sh', '-c', 'echo 1000 > /proc/self/oom_score_adj; exec "$@"', 'ff', 'nice', '-n', '15', ffmpeg(), '-nostdin', '-hide_banner', '-nostats'] + args
+    try:
+        pr = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        end = time.time() + secs
+        while pr.poll() is None:
+            if job.stop or STOP.is_set() or time.time() > end: pr.kill(); pr.wait(); return ''
+            time.sleep(0.05)
+        return pr.stderr.read().decode('utf8', 'replace')
+    except Exception: return ''
+def screen_ar():
+    try: return float(xbmc.getInfoLabel('System.ScreenWidth')) / float(xbmc.getInfoLabel('System.ScreenHeight'))
+    except Exception: return 16 / 9.0
+def az_zoom(g, mode, top):
+    # g: frame aspect F, picture size cw/ch and centre offset ox/oy as fractions of the frame.
+    # Kodi fits the frame to the screen, then zoom scales it about the centre; z is the least zoom that covers the screen.
+    S = screen_ar(); F = g['F']
+    fw, fh = (F, 1.0) if F <= S else (S, S / F)
+    w, h = fw * g['cw'], fh * g['ch']
+    w, h = max(0.05, w - 2 * abs(fw * g['ox'])), max(0.05, h - 2 * abs(fh * g['oy']))
+    zw, zh = S / w, 1.0 / h
+    if mode == 'fill': z = max(zw, zh)
+    else: z = zh if w / h >= S else min(zw, zh)  # 'bars': top and bottom only, a 4:3 film keeps its side bars
+    return max(1.0, min(top, z))
+class AutoZoom(threading.Thread):
+    def __init__(self, f, cfg, fresh):
+        threading.Thread.__init__(self); self.daemon = True
+        self.f, self.cfg, self.fresh, self.stop = f, cfg, fresh, False
+        self.key = hashlib.md5(f.partition('|')[0].encode('utf8', 'replace')).hexdigest()[:16]
+        self.applied = None
+    def info(self, **kw):
+        home.setProperty('kodicontrol.azinfo', json.dumps(dict(kw, at=int(time.time()))))
+    def apply(self, g, how):
+        if self.stop: return
+        z = round(az_zoom(g, self.cfg.get('mode', 'fill'), float(self.cfg.get('max', 1.6))), 3)
+        try: now = float((krpc('Player.GetViewMode', {}) or {}).get('zoom', 1.0))
+        except Exception: now = 1.0
+        # the zoom button (or the remote) changed it since: that's the viewer's choice, leave it
+        if self.applied is not None and abs(now - self.applied) > 0.011: self.stop = True; return
+        if abs(now - z) > 0.005:
+            krpc('Player.SetViewMode', {'viewmode': 'normal' if z == 1.0 else {'zoom': z}})
+            if self.cfg.get('notify', True) and z != 1.0:
+                xbmcgui.Dialog().notification('Auto zoom', '%.2fx  ·  picture %.2f:1' % (z, g['A']), xbmcgui.NOTIFICATION_INFO, 2000, False)
+        self.applied = z
+        self.info(state='done' if how != 'measuring' else 'measuring', how=how, zoom=z, ar=round(g['A'], 2), samples=g.get('n', 0))
+    def sample(self, url, hdr, t):
+        a = (['-headers', hdr] if hdr else []) + ['-threads', '1', '-skip_frame', 'nokey', '-ss', str(int(t)), '-noaccurate_seek', '-i', url,
+             '-map', '0:v:0', '-an', '-sn', '-dn', '-frames:v', '3', '-vf', 'cropdetect=limit=0.1:round=2:reset=0:skip=0', '-f', 'null', '-']
+        err = ffrun(a, self)
+        m = re.search(r'Stream #\S+.*?: Video: .*?, (\d{2,5})x(\d{2,5})(?: \[SAR (\d+):(\d+))?', err)
+        cr = re.findall(r'crop=(\d+):(\d+):(\d+):(\d+)', err)
+        if not m or not cr: return None
+        W, H = int(m.group(1)), int(m.group(2))
+        sar = float(m.group(3)) / float(m.group(4)) if m.group(3) and int(m.group(4)) and int(m.group(3)) else 1.0
+        cw, ch, cx, cy = [int(v) for v in cr[-1]]
+        if cw < W * 0.3 or ch < H * 0.3: return None  # a black or nearly black frame says nothing about the bars
+        return {'F': W * sar / H, 'cw': cw / float(W), 'ch': ch / float(H), 'ox': (cx + cw / 2.0) / W - 0.5, 'oy': (cy + ch / 2.0) / H - 0.5, 'A': cw * sar / ch}
+    def run(self):
+        cache = jload(AZCACHE)
+        # Kodi sets its own view mode while a film starts (and the display may switch mode): wait for that first
+        for _ in range(30):
+            if self.stop or STOP.is_set(): return
+            try:
+                if player.getTime() > 1.5: break
+            except Exception: pass
+            time.sleep(0.5)
+        time.sleep(1.5)
+        if not self.fresh and self.key in cache:
+            g = cache[self.key]; self.apply(g, 'remembered'); return
+        url, hdr = source(self.f)
+        try: dur = float(player.getTotalTime())
+        except Exception: dur = 0
+        remote = url is not None and not url.startswith('/') and not url.startswith('http://127.0.0.1')
+        if not url or not ffmpeg() or (remote and dur <= 0):
+            # a live stream or no ffmpeg: all there is to go on is the frame shape Kodi reports (cropped encodes)
+            try: F = float(xbmc.getInfoLabel('VideoPlayer.VideoAspect'))
+            except Exception: F = 0
+            if F > 0: self.apply({'F': F, 'cw': 1, 'ch': 1, 'ox': 0, 'oy': 0, 'A': F, 'n': 0}, 'frame shape')
+            else: self.info(state='none', why='no picture size')
+            return
+        pts = [dur * p for p in ((0.12, 0.3, 0.5, 0.7, 0.86) if remote else (0.08, 0.17, 0.26, 0.35, 0.44, 0.53, 0.62, 0.71, 0.8, 0.88))] if dur > 0 else [0]
+        got, best = [], None
+        for i, t in enumerate(pts):
+            while memfree() < 450 << 20 and not self.stop and not STOP.is_set(): time.sleep(3)
+            if self.stop or STOP.is_set(): return
+            self.info(state='measuring', step=i + 1, of=len(pts))
+            s = self.sample(url, hdr, t)
+            if s: got.append(s)
+            if not got: continue
+            # the picture shape most samples agree on (within 2%); dark scenes read as narrower, so they don't outvote it
+            groups = []
+            for s in got:
+                for gr in groups:
+                    if abs(gr[0]['A'] - s['A']) / gr[0]['A'] < 0.02: gr.append(s); break
+                else: groups.append([s])
+            gr = max(groups, key=lambda x: (len(x), -x[0]['A']))
+            gr = sorted(gr, key=lambda x: x['A']); best = dict(gr[len(gr) // 2], n=len(gr))
+            if len(gr) >= 3 or i == len(pts) - 1: self.apply(best, 'measuring' if i < len(pts) - 1 else 'measured')
+        if best:
+            cache[self.key] = best
+            if len(cache) > 800: cache = dict(list(cache.items())[-600:])
+            jsave(AZCACHE, cache)
+            self.apply(best, 'measured')
+        else: self.info(state='none', why='no usable frames')
+def az_tick(playing, now):
+    a = AZ['cfg']
+    if not (a.get('on') and playing):
+        if AZ['job']: AZ['job'].stop = True; AZ['job'] = None
+        AZ['file'] = None; return
+    try: f = player.getPlayingFile()
+    except Exception: return
+    req = home.getProperty('kodicontrol.azreq')
+    fresh = req != AZ['req']
+    if f != AZ['file'] or fresh:
+        AZ['req'] = req; AZ['file'] = f
+        if AZ['job']: AZ['job'].stop = True
+        AZ['job'] = AutoZoom(f, a, fresh and req != ''); AZ['job'].start()
+
 mon, player = xbmc.Monitor(), xbmc.Player()
 gen, cur, last, cfgAt, c = None, None, 0, 0, {}
+AZ['cfg'] = {}; AZ['req'] = home.getProperty('kodicontrol.azreq')
 while not mon.abortRequested():
     now = time.time()
-    if now - cfgAt > 5: c, cfgAt = conf(), now
-    on = c.get('on') and player.isPlayingVideo()
+    if now - cfgAt > 5: c, cfgAt = conf(), now; AZ['cfg'] = jload(AZCFG)
+    playing = player.isPlayingVideo()
+    az_tick(playing, now)
+    on = c.get('on') and playing
     if not on:
         if gen:
             gen.stop = True; gen = None; cur = None; clear()
@@ -455,6 +598,7 @@ while not mon.abortRequested():
         clear(); last = 0
     mon.waitForAbort(0.1)
 STOP.set()
+if AZ['job']: AZ['job'].stop = True
 if gen: gen.stop = True; gen.ev.set(); gen.join(2)
 if PROXY['srv']:
     try: PROXY['srv'].shutdown(); PROXY['srv'].server_close()
@@ -595,7 +739,7 @@ async function addonEnable({ id, enabled }) {
 // Add-ons the app installs (or can install). Removing one: disable it, delete its folder, its settings and the
 // downloaded zip, then let Kodi re-scan. Only these ids can be removed from the app.
 const APP_ADDONS = {
-  'script.kodicontrol': { name: 'Kodi Control helper', why: 'zoom preset button, seek preview service', heavy: 'Seek preview runs ffmpeg on the box while you watch' },
+  'script.kodicontrol': { name: 'Kodi Control helper', why: 'zoom preset button, auto zoom, seek preview service', heavy: 'Seek preview and auto zoom run ffmpeg on the box while you watch' },
   'service.kodicontrol': { name: 'Kodi Control stats helper', why: 'fast dashboard route (HTTP on your network)', heavy: '' },
   'tools.ffmpeg-tools': { name: 'FFmpeg Tools (CoreELEC repository)', why: 'makes the seek preview frames', heavy: '65 MB on the eMMC; decodes video frames in the background during playback' },
   'virtual.system-tools': { name: 'System Tools (CoreELEC repository)', why: 'iftop for "Streaming from"', heavy: '' },
@@ -614,7 +758,7 @@ async function undoStatus() {
   return {
     addons: ids.map(id => ({ id, ...APP_ADDONS[id], installed: there.includes(id), enabled: there.includes(id) ? det[id].enabled !== false : false, version: (det[id] || {}).version, byApp: (cfg.installed || []).includes(id), copy: fs.existsSync(addonCopy(id)) })),
     skins: skins.filter(x => patched.includes(x.id) || hasTweaks(cfg.skins[x.id]) || (cfg.seek && cfg.seek.on && x.path.startsWith(KH))).map(x => ({ id: x.id, name: x.name, patched: patched.includes(x.id), active: x.id === current, tweaks: hasTweaks(cfg.skins[x.id]) })),
-    seekOn: !!(cfg.seek && cfg.seek.on), seekRam: !!(cfg.seek && cfg.seek.ram),
+    autozoomOn: !!(cfg.autozoom && cfg.autozoom.on), seekOn: !!(cfg.seek && cfg.seek.on), seekRam: !!(cfg.seek && cfg.seek.ram),
     seek: { delay, steps, orig, changed: delay != null && (delay !== orig.delay || JSON.stringify(steps) !== JSON.stringify(orig.steps)) },
     keymapFile: files.includes('km'), iptvOrig: files.some(l => l.startsWith('iptv ')), seekCacheKb: +((files.find(l => l.startsWith('cache ')) || '').slice(6)) || 0,
     addonToggles: Object.entries(cfg.addonOrig || {}).map(([id, was]) => ({ id, was })), artChanges: (cfg.artUndo || []).length,
@@ -1655,6 +1799,46 @@ const handlers = {
     return notes.join(' · ');
   },
   'seek:enable': a => { if (!ssh) throw new Error('Not connected'); return seekEnable(a || {}); },
+  // Tools → Auto zoom: the helper service measures the black bars in each film and zooms them off the screen
+  'autozoom:get': async () => {
+    if (!ssh) throw new Error('Not connected');
+    const A = KH + '/userdata/addon_data/script.kodicontrol';
+    const [conf, cache] = (await sh(`cat ${q(A + '/autozoom.json')} 2>/dev/null; echo; echo ---; cat ${q(A + '/autozoom-cache.json')} 2>/dev/null`)).split('---');
+    let c = {}, n = 0;
+    try { c = JSON.parse(conf.trim() || '{}'); } catch {}
+    try { n = Object.keys(JSON.parse(cache.trim() || '{}')).length; } catch {}
+    const lab = await rpc('XBMC.GetInfoLabels', { labels: ['Window(10000).Property(kodicontrol.azinfo)', 'VideoPlayer.Title', 'System.ScreenWidth', 'System.ScreenHeight'] }).catch(() => ({}));
+    let info = null;
+    try { info = JSON.parse(lab['Window(10000).Property(kodicontrol.azinfo)'] || 'null'); } catch {}
+    const playing = ((await rpc('Player.GetActivePlayers', {}).catch(() => [])) || []).some(p => p.type === 'video');
+    const vm = playing ? await rpc('Player.GetViewMode', {}).catch(() => null) : null;
+    // add-ons that zoom by themselves (Black Bars Never and the like) would fight with this
+    const others = ((await rpc('Addons.GetAddons', { enabled: true, properties: ['name'] }).catch(() => ({}))).addons || [])
+      .filter(a => /black.?bars|blackbar|auto.?zoom|zoom/i.test(a.addonid + ' ' + a.name) && a.addonid !== 'script.kodicontrol').map(a => a.name || a.addonid);
+    const ff = (await sh(`[ -x ${q(KH + '/addons/tools.ffmpeg-tools/bin/ffmpeg')} ] && echo y; true`)).trim() === 'y';
+    return { on: !!c.on, mode: c.mode || 'fill', max: +c.max || 1.6, notify: c.notify !== false, remembered: n, info, playing, title: lab['VideoPlayer.Title'] || '', zoom: vm ? vm.zoom : null,
+      screen: `${lab['System.ScreenWidth'] || '?'}x${lab['System.ScreenHeight'] || '?'}`, others, ffmpeg: ff };
+  },
+  'autozoom:save': async ({ on, mode, max, notify }) => {
+    if (!ssh) throw new Error('Not connected');
+    const c = { on: !!on, mode: mode === 'bars' ? 'bars' : 'fill', max: Math.max(1.1, Math.min(2, +max || 1.6)), notify: notify !== false };
+    cfg.autozoom = c; saveCfg();
+    const notes = [];
+    if (on) notes.push(await ensureHelper());
+    await exec(`mkdir -p ${q(KH + '/userdata/addon_data/script.kodicontrol')} && cat > ${q(KH + '/userdata/addon_data/script.kodicontrol/autozoom.json')}`, { stdin: JSON.stringify(c) });
+    // switching off also takes the zoom off the film that is playing now
+    if (!on && ((await rpc('Player.GetActivePlayers', {}).catch(() => [])) || []).some(p => p.type === 'video')) {
+      await rpc('Player.SetViewMode', { viewmode: 'normal' }).catch(() => {}); notes.push('the playing film is back to normal');
+    }
+    notes.unshift(on ? `Auto zoom on: ${c.mode === 'fill' ? 'fills the whole screen' : 'removes the top and bottom bars'}, at most ${c.max.toFixed(2)}x` : 'Auto zoom off');
+    return notes.filter(Boolean).join(' · ');
+  },
+  'autozoom:detect': async () => {
+    if (!ssh) throw new Error('Not connected');
+    await rpc('Addons.ExecuteAddon', { addonid: 'script.kodicontrol', params: ['autozoom'], wait: false });
+    return true;
+  },
+  'autozoom:forget': async () => { if (!ssh) throw new Error('Not connected'); await exec(`rm -f ${q(KH + '/userdata/addon_data/script.kodicontrol/autozoom-cache.json')}`); return 'Measured films forgotten: each is measured again the next time it plays'; },
   'seek:apply': async a => {
     if (!ssh) throw new Error('Not connected');
     // the skins only carry the box's look; frame step, delay and steps live in seek.json and Kodi's settings,

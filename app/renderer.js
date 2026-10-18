@@ -440,7 +440,7 @@ $('tiUndoAll').onclick = e => needConn() && act(e.currentTarget, async () => {
   if (!confirm('Put every title changed here back to what it was?')) return;
   toast(await call('titles:undo')); $('tiLoad').click();
 });
-const SHORTCUTS = { 'ctrl+e': 'titles', 'ctrl+n': 'nfo', 'ctrl+shift+s': 'shot', 'ctrl+shift+c': 'shot:copy', 'ctrl+t': 'type' };
+const SHORTCUTS = { 'ctrl+e': 'titles', 'ctrl+n': 'nfo', 'ctrl+shift+s': 'shot', 'ctrl+shift+c': 'shot:copy', 'ctrl+t': 'type', 'ctrl+b': 'autozoom' };
 document.addEventListener('keydown', e => {
   if (!e.ctrlKey || e.altKey || e.metaKey) return;
   const id = SHORTCUTS[(e.shiftKey ? 'ctrl+shift+' : 'ctrl+') + e.key.toLowerCase()];
@@ -457,7 +457,60 @@ async function runTool(id) {
   if (id === 'type') { kbHidden = false; return kbShow({ title: 'Type into the field that has focus on the TV' }); }
   if (id === 'ports') show('ports');
   if (id === 'update') { pop('upPop', true); return upCheck(); }
+  if (id === 'autozoom') { if (!needConn()) return; pop('azPop', true); return azLoad(); }
 }
+
+// ---------- Tools → Auto zoom ----------
+const AZ = { r: null, t: null };
+function azShow(r) {
+  const lines = [];
+  if (!r.ffmpeg) lines.push({ bad: true, text: 'FFmpeg Tools is not on the box, so only films whose frame is already cropped (most encodes) can be zoomed. Remuxes need it: switch on Seek preview once on the OSD page to install it, or install "FFmpeg Tools" from the CoreELEC repository.' });
+  if (r.others.length) lines.push({ bad: true, text: `Also zooming by itself: ${r.others.join(', ')}. Switch it off in Add-ons so the two don't fight.` });
+  const i = r.info;
+  if (!r.playing) lines.push({ text: `Nothing playing. ${r.remembered} film${r.remembered === 1 ? '' : 's'} measured so far · screen ${r.screen}` });
+  else if (!r.on) lines.push({ text: `Playing ${r.title || 'a video'} · zoom ${r.zoom ? (+r.zoom).toFixed(2) + '×' : '?'} · auto zoom is off` });
+  else if (!i) lines.push({ text: `Playing ${r.title || 'a video'} · waiting for the film to start` });
+  else if (i.state === 'measuring' && !i.zoom) lines.push({ text: `Playing ${r.title || 'a video'} · measuring the bars, frame ${i.step || 1} of ${i.of || '?'}…` });
+  else if (i.state === 'none') lines.push({ bad: true, text: `Playing ${r.title || 'a video'} · could not measure it (${i.why})` });
+  else lines.push({ ok: true, text: `Playing ${r.title || 'a video'} · picture ${(+i.ar).toFixed(2)}:1 → zoom ${(+i.zoom).toFixed(2)}× (${i.how === 'remembered' ? 'measured before' : i.how === 'frame shape' ? 'from the frame shape' : `${i.samples} frames agree`})${r.zoom && Math.abs(r.zoom - i.zoom) > 0.011 ? ` · now ${(+r.zoom).toFixed(2)}×, changed with the zoom button` : ''}` });
+  report($('azState'), lines);
+  $('azMore').textContent = r.remembered ? `${r.remembered} remembered` : '';
+}
+async function azLoad() {
+  report($('azState'), [{ text: 'Reading the box…' }]);
+  try {
+    const r = AZ.r = await call('autozoom:get');
+    $('azOn').classList.toggle('on', r.on); $('azOn').setAttribute('aria-checked', r.on);
+    $('azMode').value = r.mode; $('azMax').value = (+r.max).toFixed(2); $('azNote').checked = r.notify;
+    azShow(r);
+  } catch (e) { report($('azState'), [{ bad: true, text: e.message }]); }
+}
+// while the dialog is open and a film is being measured, follow it
+function azFollow(sec = 90) {
+  clearTimeout(AZ.t);
+  const end = Date.now() + sec * 1000;
+  const tick = async () => {
+    if ($('azPop').hidden || Date.now() > end) return;
+    try { const r = AZ.r = await call('autozoom:get'); azShow(r); if (r.info && r.info.state === 'done' && r.info.at * 1000 > end - sec * 1000) return; } catch {}
+    AZ.t = setTimeout(tick, 1500);
+  };
+  AZ.t = setTimeout(tick, 1200);
+}
+const azConf = () => ({ on: $('azOn').classList.contains('on'), mode: $('azMode').value, max: +$('azMax').value, notify: $('azNote').checked });
+$('azOn').onclick = e => { const on = e.currentTarget.classList.toggle('on'); e.currentTarget.setAttribute('aria-checked', on); };
+$('azSave').onclick = e => act(e.currentTarget, async () => {
+  const c = azConf();
+  if (c.on && AZ.r && !AZ.r.on && !heavyOk('autozoom', 'Auto zoom runs ffmpeg on the box for about 20 seconds when a new film starts (never again for that film), and reads about 10 frames from the file.')) return;
+  toast(await call('autozoom:save', c));
+  await azLoad();
+  if (c.on && AZ.r && AZ.r.playing) azFollow();
+});
+$('azNow').onclick = e => act(e.currentTarget, async () => {
+  if (!AZ.r || !AZ.r.on) return toast('Switch auto zoom on and save first', true);
+  if (!AZ.r.playing) return toast('Nothing is playing', true);
+  await call('autozoom:detect'); report($('azState'), [{ text: 'Measuring the playing film again…' }]); azFollow();
+});
+$('azForget').onclick = e => act(e.currentTarget, async () => { if (!confirm('Forget every measured film? Each one is measured again the next time it plays.')) return; toast(await call('autozoom:forget')); azLoad(); });
 
 // ---------- Help → Check for updates ----------
 const UP = { r: null, file: '' };
@@ -1655,6 +1708,7 @@ async function unLoad(btn) {
         `${swHtml(a.installed && a.enabled, `data-unsw="${esc(a.id)}"`, a.name)}${a.installed ? `<button class="btn" data-unrm="${esc(a.id)}">Remove</button>` : ''}`]);
     }
     rows.push(['Seek preview', u.seekOn ? 'On in every skin' : 'Off · Kodi\'s own seek settings', swHtml(u.seekOn, 'data-unseek', 'Seek preview')]);
+    rows.push(['Auto zoom', u.autozoomOn ? 'Zooms the black bars off every film (Tools → Auto zoom)' : 'Off · films play at Kodi\'s normal size', swHtml(u.autozoomOn, 'data-unaz', 'Auto zoom')]);
     if (u.seek.changed && !u.seekOn) rows.push(['Kodi seek delay and steps', `Now ${u.seek.delay} ms, ${(u.seek.steps || []).join(', ')} s · was ${u.seek.orig.delay} ms, ${u.seek.orig.steps.join(', ')} s`, '<button class="btn" data-un="seek:default">Put back</button>']);
     rows.push(['Seek preview frame cache', `${u.seekRam ? 'RAM only, nothing on the eMMC' : 'Kept on the eMMC (last 3 videos)'}${u.seekCacheKb ? ' · ' + fmtBytes(u.seekCacheKb * 1024) + ' now' : ''}<br><span class="note">Switch on = keep frames on the eMMC; off = RAM only</span>`,
       `${swHtml(!u.seekRam, 'data-unram', 'Keep seek frames on the eMMC')}${u.seekCacheKb ? '<button class="btn" data-un="seek:clearCache">Delete</button>' : ''}`]);
@@ -1684,6 +1738,7 @@ async function unLoad(btn) {
       unLoad(); cHelperState(); osdHelperState();
     }));
     $$('[data-unseek]').forEach(el => el.onclick = () => { show('osd'); $('skOn').scrollIntoView({ block: 'center' }); $('skOn').click(); });
+    $$('[data-unaz]').forEach(el => el.onclick = () => busy(el, async () => { const a = await call('autozoom:get'); toast(await call('autozoom:save', { ...a, on: !el.classList.contains('on') })); }));
     $$('[data-unfont]').forEach(el => el.onclick = () => busy(el, async () => toast(await call('font:cjk', false))));
     $$('[data-unram]').forEach(el => el.onclick = () => busy(el, async () => { toast(await call('seek:ram', el.classList.contains('on'))); }));
     $$('[data-unskin]').forEach(el => el.onclick = () => {
