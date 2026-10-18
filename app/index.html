@@ -58,6 +58,13 @@ h3{font:600 14px var(--head);text-transform:uppercase;letter-spacing:.06em;color
 .between{justify-content:space-between}
 .tog{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
 .tog:last-child{border:0}
+.card.stick{position:sticky;top:12px;align-self:start}
+.report.rep{max-height:280px;overflow:auto}
+.report.rep:not(:empty){margin-top:10px;padding-top:8px;border-top:1px solid var(--border)}
+.report.rep:not(:empty)::before{content:"What changed on the box";display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:4px}
+#skin .tog,#osd .tog{padding:6px 0}
+#skin .tog .note,#osd .tog .note{margin:2px 0 0;font-size:12px}
+#skin h3,#osd h3{margin-bottom:6px}
 .sw{width:42px;height:24px;border-radius:20px;background:var(--surface2);border:1px solid var(--border);position:relative;cursor:pointer;flex:none}
 .sw::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--muted);transition:.2s}
 .sw.on{background:var(--primary)}.sw.on::after{left:20px;background:var(--on-primary)}
@@ -205,16 +212,16 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
     <div class="row"><select id="skinsel"></select><span class="tag" id="skinCur"></span><button class="btn" id="skinSwitch">Switch Kodi to this skin</button></div></div>
   <p class="sub">Works on any installed skin. Settings are saved per skin and patched into a fresh copy of that skin's original XML over SSH, then the skin is reloaded. Revert puts the original files back.</p>
   <div class="grid g2">
-    <div class="card"><h3>Preview</h3>
+    <div class="card stick"><h3>Preview</h3>
       <div class="tv" id="tv">
         <div class="topbar" id="tb"><span>Sat 17 Oct</span><span>21:42</span></div>
         <div class="posters" id="po"><b></b><b></b><b></b><b></b><b></b></div>
         <div class="homebar solid" id="hb"></div>
         <div id="vb" style="position:absolute;top:10%;right:5%;width:120px;height:6px;background:rgba(255,255,255,.25);border-radius:6px"><i style="display:block;width:65%;height:100%;background:#38bdf8;border-radius:6px"></i></div>
       </div>
-      <div class="note">Rough sketch of what each toggle changes. The real result depends on how the skin is built, so read the report after applying.</div>
+      <div class="note">Rough sketch of what each toggle changes. After Apply, what changed on the box is listed right under the buttons.</div>
       <div class="row" style="margin-top:12px"><button class="btn p" id="skinApply">Apply to Kodi</button><button class="btn" id="skinRevert">Revert to original</button><button class="btn" id="skinDefault" title="Turn every skin tweak off and put the original skin files back">Default</button><span id="skinBusy"></span></div>
-      <div class="report" id="skinReport"></div>
+      <div class="report rep" id="skinReport"></div>
     </div>
     <div class="card"><h3>Home &amp; layout</h3>
       <div class="tog"><span>Transparent home bar<div class="note">Makes the main menu's background textures see-through</div></span><div class="sw" data-k="hbTransparent"></div></div>
@@ -276,7 +283,7 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
 <section class="page" id="osd">
   <h1>OSD themes</h1><p class="sub">Change the video OSD of any skin: add a zoom button, or borrow the OSD from another installed skin.</p>
   <div class="grid g2">
-    <div class="card"><h3>Zoom presets</h3>
+    <div class="card stick"><h3>Zoom presets</h3>
       <div class="tv"><div class="osd"><div class="row between"><b id="osdTitle">Now playing</b><span id="osdTime"></span></div><div class="tl"><i></i></div>
         <div class="othumb" id="osdThumb"><span>Play · Subs · Audio</span><span class="btn p">Zoom</span></div></div></div>
       <div class="note" id="osdThumbNote">Pick an OSD style source to see its buttons here. The highlighted one becomes the zoom preset.</div>
@@ -295,10 +302,10 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
       <label class="f" id="zrWrap" style="margin:6px 0 10px;display:none">Which button should become the zoom preset?<select id="zoomRep"></select><span class="note" id="zrNote"></span></label>
       <div class="tog"><span>Transparent OSD<div class="note">Clears the OSD backgrounds; the play button, progress bar and button row stay visible</div></span><div class="sw" data-o="osdClear"></div></div>
       <div style="padding:10px 0;border-bottom:1px solid var(--border)"><div class="row between"><span>Progress bar thickness</span><span class="mono" id="obv">stock</span></div><input type="range" min="0" max="20" step="1" value="0" id="ob"><div class="note">0 = skin default. Lower = thinner bar (pixels).</div></div>
-      <div style="padding-top:10px"><div class="row between"><span>OSD buttons<div class="note">Untick to hide a button</div></span><button class="btn" id="obLoad">Load buttons</button></div><div class="chips" id="osdBtns" style="margin-top:8px"><span class="empty">Press Load buttons.</span></div></div>
+      <div style="padding-top:10px"><div class="row between"><span>OSD buttons<div class="note">Untick to hide a button on the TV</div></span><button class="btn" id="obLoad">Show buttons</button></div><div class="chips" id="osdBtns" style="margin-top:8px"><span class="empty">Press Load buttons.</span></div></div>
       <div class="row" style="margin-top:12px"><button class="btn p" id="osdApply">Apply OSD</button><span class="row" style="gap:8px"><span class="note" id="osdHelperState" style="margin:0">Kodi Control helper (script.kodicontrol): –</span><div class="sw" id="osdHelperSw" role="switch" aria-label="Kodi Control helper add-on" title="Install / enable or disable the Kodi Control helper add-on (zoom button, seek preview)"></div></span><button class="btn" id="osdDefault" title="Stock OSD: no zoom button, no borrowed OSD, no seek preview">Default OSD</button><span id="osdBusy"></span></div>
       <div class="note">Applying also applies this skin's other tweaks from the Skin tweaks page, because both are built from the skin's original files.</div>
-      <div class="report" id="osdReport"></div>
+      <div class="report rep" id="osdReport"></div>
     </div>
   </div>
   <div class="card" style="margin-top:16px"><div class="row between"><h3>Seek preview <span class="tag warn" title="ffmpeg decodes frames on the box in the background during playback, and reads extra data from the NAS or stream">heavy on the box</span></h3><div class="sw" id="skOn" role="switch" aria-label="Seek preview"></div></div>

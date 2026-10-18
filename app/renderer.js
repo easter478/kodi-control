@@ -981,7 +981,7 @@ function loadSkinState() {
   $('osdsrc').innerHTML = '<option value="">This skin\'s own OSD</option>' + S.skins.filter(s => s.id !== tid).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
   $('osdsrc').value = T.osdFrom || '';
   $$('#osd .sw[data-o]').forEach(s => s.classList.toggle('on', !!T[s.dataset.o]));
-  $('ob').value = T.osdBarH || 0; obLabel(); OB = []; renderOsdBtns(); skLoadT();
+  $('ob').value = T.osdBarH || 0; obLabel(); OB = []; OBshow = false; renderOsdBtns(); skLoadT();
   $('osdReport').innerHTML = '';
   THUMB = null; thumbFor = ''; zrVis(); if (curPage === 'osd') osdThumbLoad();
 }
@@ -1150,15 +1150,18 @@ $('hiAllI').onclick = () => hiTick(i => i.kind === 'icon');
 $('hiNone').onclick = () => { T.hideItems = []; save(); renderHI(); };
 
 // ---------- OSD ----------
-let OB = [];
+let OB = [], OBshow = false; // the button list is read for the preview, but only shown when asked
 const obLabel = () => $('obv').textContent = +$('ob').value ? $('ob').value + ' px' : 'stock';
 $('ob').oninput = e => { T.osdBarH = +e.target.value; obLabel(); save(); };
 function renderOsdBtns() {
+  $('obLoad').textContent = OBshow ? 'Hide buttons' : 'Show buttons';
+  const summary = `${OB.length ? OB.length + ' buttons' : ''}${OB.length && T.osdHide.length ? ' · ' : ''}${T.osdHide.length ? T.osdHide.length + ' hidden' : ''}`;
+  if (!OBshow) { $('osdBtns').innerHTML = `<span class="note" style="margin:0">${summary ? esc(summary) + ' · ' : ''}press Show buttons to pick which ones the OSD shows</span>`; return; }
   if (!OB.length) { $('osdBtns').innerHTML = T.osdHide.length ? `<span class="note" style="margin:0">${T.osdHide.length} hidden · press Load buttons to edit</span>` : '<span class="empty">Press Load buttons.</span>'; return; }
   // grouped by section (Video / Live TV / Music), each chip named from what the button does
   const groups = {};
   OB.forEach(b => (groups[b.section || 'Video'] ||= []).push(b));
-  $('osdBtns').innerHTML = Object.entries(groups).map(([sec, list]) => `<div style="width:100%"><div class="label" style="margin:6px 0 4px">${esc(sec)} OSD</div>${list.map(b => {
+  $('osdBtns').innerHTML = Object.entries(groups).map(([sec, list]) => `<div style="width:100%;display:flex;flex-wrap:wrap;gap:6px"><div class="label" style="margin:6px 0 2px;width:100%">${esc(sec)} OSD</div>${list.map(b => {
     const shown = !T.osdHide.includes(b.id);
     const name = b.name || b.label || b.texture.replace(/\.(png|jpg)$/i, '') || (b.onclick || '').replace(/\(.*/, '') || 'Button';
     const tip = [b.onclick && 'Action: ' + b.onclick, b.visible && 'Shown when: ' + b.visible, `id ${b.id} · ${b.file}${b.include ? ' · ' + b.include : ''}`].filter(Boolean).join('\n');
@@ -1169,11 +1172,15 @@ function renderOsdBtns() {
     T.osdHide = $$('[data-ob]').filter(x => !x.checked).map(x => x.dataset.ob); save(); renderThumb();
   });
 }
-$('obLoad').onclick = e => needConn() && tid && act(e.currentTarget, async () => {
-  OB = await call('skin:osdButtons', { id: tid, from: T.osdFrom });
+$('obLoad').onclick = e => {
+  if (OBshow) { OBshow = false; renderOsdBtns(); return; }
+  if (OB.length) { OBshow = true; renderOsdBtns(); return; }
+  needConn() && tid && act(e.currentTarget, async () => {
+  OB = await call('skin:osdButtons', { id: tid, from: T.osdFrom }); OBshow = true;
   if (!OB.length) toast('No VideoOSD.xml buttons found in this skin.', true);
   renderOsdBtns();
-});
+  });
+};
 function saveOsd() { T.osdFrom = $('osdsrc').value; T.osdHide = []; OB = []; delete T.zoomReplace; delete T.zoomReplaceName; THUMB = null; save(); renderOsdBtns(); osdThumbLoad(); }
 $('osdsrc').onchange = saveOsd;
 $$('#osd .sw[data-o]').forEach(s => s.onclick = () => { T[s.dataset.o] = s.classList.toggle('on'); save(); if (s.dataset.o === 'osdZoom') { zrVis(); if (T.osdZoom) osdThumbLoad(); } });
