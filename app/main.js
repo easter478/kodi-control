@@ -219,7 +219,7 @@ async function builtin(cmd) {
 
 // ---------- helper add-on ----------
 const HELPER_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<addon id="script.kodicontrol" name="Kodi Control helper" version="1.2.1" provider-name="Kodi Control">
+<addon id="script.kodicontrol" name="Kodi Control helper" version="1.2.2" provider-name="Kodi Control">
   <requires><import addon="xbmc.python" version="3.0.0"/></requires>
   <extension point="xbmc.python.script" library="default.py"/>
   <extension point="xbmc.service" library="service.py" start="login"/>
@@ -280,6 +280,10 @@ def conf():
     try:
         with open(CFG) as f: return json.load(f)
     except Exception: return {}
+def memfree():
+    try:
+        with open('/proc/meminfo') as f: return next(int(l.split()[1]) * 1024 for l in f if l.startswith('MemAvailable:'))
+    except Exception: return 1 << 40
 def ffmpeg():
     for p in (xbmcvfs.translatePath('special://home/addons/tools.ffmpeg-tools/bin/ffmpeg'), shutil.which('ffmpeg') or ''):
         if p and os.path.exists(p): return p
@@ -358,13 +362,19 @@ class Frames(threading.Thread):
         self.want, self.around, self.dur, self.stop, self.bad = None, 0, 0, False, 0
         self.remote = not url.startswith('/')
         self.ev = threading.Event()
+        self.born = time.time()
     def path(self, b): return os.path.join(self.dir, '%06d.jpg' % b)
     def make(self, b):
         p = self.path(b)
         if os.path.exists(p) or self.bad > 5: return
-        cmd = ['nice', '-n', '15', ffmpeg(), '-nostdin', '-loglevel', 'error']
+        # never let a preview frame cost Kodi its memory: wait while RAM is short, and if the kernel still runs out,
+        # oom_score_adj 1000 makes it kill this ffmpeg instead of kodi.bin
+        if memfree() < 450 << 20: self.ev.wait(3); self.ev.clear(); return
+        cmd = ['sh', '-c', 'echo 1000 > /proc/self/oom_score_adj; exec "$@"', 'ff', 'nice', '-n', '15', ffmpeg(), '-nostdin', '-loglevel', 'error']
         if self.hdr: cmd += ['-headers', self.hdr]
-        cmd += ['-ss', str(b), '-noaccurate_seek', '-i', self.url, '-frames:v', '1', '-an', '-sn', '-threads', '1', '-vf', 'scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d' % (self.width, self.height, self.width, self.height), '-q:v', '5', '-y', p + '.tmp.jpg']
+        # -threads before -i limits the decoder (after -i it only limits the jpeg encoder); frame-threaded 4K HEVC
+        # holds a set of 10-bit frames per core, ~400 MB, and on a 2 GB box that got Kodi OOM-killed on a 4K DV film
+        cmd += ['-threads', '1', '-skip_frame', 'nokey', '-ss', str(b), '-noaccurate_seek', '-i', self.url, '-frames:v', '1', '-an', '-sn', '-threads', '1', '-vf', 'scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d' % (self.width, self.height, self.width, self.height), '-q:v', '5', '-y', p + '.tmp.jpg']
         try:
             pr = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             end = time.time() + 20
@@ -379,6 +389,8 @@ class Frames(threading.Thread):
             if self.want is not None:
                 b, self.want = self.want, None
                 self.make(b); continue
+            # Kodi allocates most while a film starts (4K/DV decoder, display mode change): prefetch waits 20 s
+            if time.time() - self.born < 20: self.ev.wait(1); self.ev.clear(); continue
             # prefetch outward from where you are: the whole file when local, 10 minutes each way when streamed
             span = 600 if self.remote else max(self.dur, 600)
             todo = None
