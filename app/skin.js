@@ -1159,6 +1159,79 @@ function injectBackground(x, block) {
   return x.slice(0, at) + '\n' + block + x.slice(at);
 }
 
+// ---------- calls to disabled add-ons ----------
+// Skins call helper add-ons (RunScript(...), plugin://... lists). When one is disabled, Kodi logs "Unable to find
+// plugin" and a GetDirectory error every time. Each call gets a System.AddonIsEnabled(...) guard instead, so it
+// stays quiet while the add-on is off and works again by itself when it is switched back on.
+const ADDON_REF = /(?:RunScript\(|RunAddon\(|plugin:\/\/)((?:script|plugin|service)\.[\w.\-]+?)(?=[,)/?"&\s<]|$)/gi;
+function addonRefs(files) {
+  const ids = {};
+  for (const [k, v] of Object.entries(files)) {
+    if (!isXml(k)) continue;
+    const x = v.toString('utf8').replace(/<!--[\s\S]*?-->/g, '');
+    for (const m of x.matchAll(ADDON_REF)) ids[m[1]] = (ids[m[1]] || 0) + 1;
+  }
+  return ids;
+}
+function guardAddons(x, ids, defs = []) {
+  let n = 0;
+  for (const id of ids) {
+    const on = `System.AddonIsEnabled(${id})`;
+    const call = new RegExp(`(?:RunScript\\(|RunAddon\\(|plugin://)${reEsc(id)}(?=[,)/?"&\\s<]|$)`, 'i');
+    const cond = attrs => {
+      const m = /\bcondition\s*=\s*"([^"]*)"/i.exec(attrs);
+      if (m) return m[1].includes(on) ? null : attrs.replace(m[0], `condition="[${m[1]}] + ${on}"`);
+      return `${attrs} condition="${on}"`;
+    };
+    // actions and variable values that call it: add the condition
+    x = x.replace(/<(on(?:load|unload|click|focus|unfocus|back|up|down|left|right|info|next|prev)|value)\b([^>]*)>([^<]*)<\/\1>/gi, (all, tag, attrs, inner) => {
+      if (!call.test(inner)) return all;
+      const a = cond(attrs);
+      if (a === null) return all;
+      n++; return `<${tag}${a}>${inner}</${tag}>`;
+    });
+    // lists filled from it: the list stays hidden while the add-on is off
+    const content = new RegExp(`<content\\b[^>]*>\\s*plugin://${reEsc(id)}\\b`, 'gi');
+    const hits = [...x.matchAll(content)].map(m => m.index).reverse();
+    for (const at of hits) {
+      let from = at, open = -1;
+      while ((from = x.lastIndexOf('<control', from - 1)) >= 0) {
+        if (!/^<control\b/i.test(x.slice(from, from + 9))) continue;
+        const end = balancedEnd(x, from, 'control');
+        if (end > at) { open = from; break; }
+      }
+      if (open < 0) continue;
+      const tagEnd = x.indexOf('>', open) + 1;
+      if (x.startsWith(`<visible>${on}</visible>`, tagEnd)) continue;
+      x = x.slice(0, tagEnd) + `<visible>${on}</visible><!-- kodicontrol: hidden while ${id} is off -->` + x.slice(tagEnd);
+      n++;
+    }
+    // a hidden list still loads its content, so the path itself moves into a variable that is empty while the add-on is off
+    x = x.replace(new RegExp(`(<content\\b[^>]*>)(\\s*plugin://${reEsc(id)}\\b[^<]*)(</content>)`, 'gi'), (all, open, path, close) => {
+      const name = 'kcAddonOn_' + hashName(id + path.trim());
+      if (!defs.some(d => d.name === name)) defs.push({ name, xml: `<variable name="${name}"><value condition="${on}">${path.trim()}</value></variable>` });
+      n++; return `${open}$VAR[${name}]${close}`;
+    });
+  }
+  return { xml: x, n };
+}
+const hashName = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); };
+// the variables go into each folder's Includes.xml, where Kodi reads skin variables from
+function addVars(out, dirs, defs) {
+  let n = 0;
+  for (const d of dirs) {
+    const k = Object.keys(out).find(f => dirOf(f) === d && /^includes\.xml$/i.test(base(f)));
+    if (!k) continue;
+    const add = defs.filter(v => !out[k].includes(`<variable name="${v.name}">`));
+    if (!add.length) continue;
+    const at = out[k].lastIndexOf('</includes>');
+    if (at < 0) continue;
+    out[k] = out[k].slice(0, at) + `<!-- kodicontrol: add-on calls that wait until the add-on is on -->\n\t${add.map(v => v.xml).join('\n\t')}\n` + out[k].slice(at);
+    n += add.length;
+  }
+  return n;
+}
+
 function applyAll(files, t, opts = {}) {
   const src = {};
   for (const [k, v] of Object.entries(files)) if (isXml(k)) src[k] = v.toString('utf8');
@@ -1279,6 +1352,12 @@ function applyAll(files, t, opts = {}) {
     const r = addSeekPreview(out, dirs, t, W, H, fontOf);
     add(r.n > 0, r.n ? `Seek preview: frame box added to ${r.files.join(', ')}${r.steps ? ` · ${r.steps} OSD skip button${r.steps === 1 ? '' : 's'} now step-seek, so the preview shows from the OSD too` : ''}` : 'Seek preview: no OSD or seek bar window found');
   }
+  if (t.skipOff && t.offAddons && t.offAddons.length) {
+    const defs = [];
+    const n = each(isXml, x => guardAddons(x, t.offAddons, defs));
+    if (defs.length && !addVars(out, dirs, defs)) add(false, 'Calls to disabled add-ons: no Includes.xml to hold the list paths, so those lists still load');
+    add(n > 0, n ? `Calls to disabled add-ons (${t.offAddons.join(', ')}): ${plural(n, 'place')} now wait until the add-on is on again` : `Calls to disabled add-ons: nothing to change for ${t.offAddons.join(', ')}`);
+  } else if (t.skipOff) add(true, 'Calls to disabled add-ons: every add-on this skin calls is enabled, nothing to change');
   if (t.bgs && t.bgs.length) {
     for (const b of t.bgs) {
       if (!b.path) continue;
@@ -1336,4 +1415,4 @@ function filterMenu(xml, keep) {
   });
 }
 
-module.exports = { seekBox, osdFiles, infoItems, applyAll, animInventory, winAnimInventory, osdButtons, osdName, parsePo, INFO_FIELDS, parseMenu, filterMenu, BG_TARGETS, emptyWindow };
+module.exports = { seekBox, addonRefs, guardAddons, osdFiles, infoItems, applyAll, animInventory, winAnimInventory, osdButtons, osdName, parsePo, INFO_FIELDS, parseMenu, filterMenu, BG_TARGETS, emptyWindow };

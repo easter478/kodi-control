@@ -432,6 +432,30 @@ const AEON = {
     eq(xbt.lzo1x(src, 9).toString(), 'abcabcabc');
   });
 
+  await test('skip disabled add-ons: lists hidden, actions and values guarded, second pass changes nothing', async () => {
+    const skin = require('../app/skin');
+    const xml = `<?xml version="1.0"?><includes><include name="J"><control type="group"><control type="list" id="616"><top>20</top>
+<content>plugin://script.skin.info.service/?action=letter_jump&amp;target=50</content></control></control>
+<onload>RunScript(script.skin.info.service,action=x)</onload><onclick condition="Control.HasFocus(5)">RunScript(script.skin.info.service,a=1)</onclick>
+<onclick>RunScript(script.other,a=1)</onclick><variable name="V"><value condition="Player.HasVideo">plugin://script.skin.info.service/?action=getdetails</value><value>fallback</value></variable></include></includes>`;
+    const files = { 'xml/Home.xml': Buffer.from('<window/>'), 'xml/Includes.xml': Buffer.from(xml) };
+    eq(skin.addonRefs(files)['script.skin.info.service'], 4);
+    const t = { skipOff: true, offAddons: ['script.skin.info.service'] };
+    const r = skin.applyAll(files, t, {});
+    const out = r.changed['xml/Includes.xml'];
+    ok(/<control type="list" id="616"><visible>System\.AddonIsEnabled\(script\.skin\.info\.service\)<\/visible>/.test(out), 'the letter-jump list is hidden while the add-on is off');
+    // Kodi loads a hidden list's content anyway: the path moves into a variable that is empty while the add-on is off
+    const v = /<content>\$VAR\[(kcAddonOn_\w+)\]<\/content>/.exec(out);
+    ok(v, 'the list path is a variable');
+    ok(out.includes(`<variable name="${v[1]}"><value condition="System.AddonIsEnabled(script.skin.info.service)">plugin://script.skin.info.service/?action=letter_jump&amp;target=50</value></variable>`), 'the variable is defined in Includes.xml');
+    ok(out.includes('<onload condition="System.AddonIsEnabled(script.skin.info.service)">'), 'onload guarded');
+    ok(out.includes('<onclick condition="[Control.HasFocus(5)] + System.AddonIsEnabled(script.skin.info.service)">'), 'existing condition kept');
+    ok(out.includes('<onclick>RunScript(script.other,a=1)</onclick>'), 'other add-ons untouched');
+    ok(out.includes('<value condition="[Player.HasVideo] + System.AddonIsEnabled(script.skin.info.service)">'), 'variable value guarded');
+    const again = skin.applyAll({ ...files, 'xml/Includes.xml': Buffer.from(out) }, t, {});
+    eq(Object.keys(again.changed).length, 0);
+  });
+
   await test('titles: rename keeps the first title, put back restores it, font switch is reversible', async () => {
     const lib = { 7: { movieid: 7, title: 'Parasite', originaltitle: '기생충', sorttitle: '', year: 2019 } };
     let font = 'Default';

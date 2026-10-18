@@ -668,7 +668,7 @@ async function seekDefault() {
 const SEEK_LOOK = { place: 'follow', size: 'medium', bottom: 230, color: 'FFFFFFFF' };
 const SEEK_KEYS = ['seekPreview', 'seekPlace', 'seekSize', 'seekBottom', 'seekColor'];
 // the same defaults as the Skin tweaks page: a skin whose saved settings all match these has nothing to patch
-const TWEAK_DEF = { busy: false, vol: false, topbar: false, hbTransparent: false, posters: false, fullArt: false, fullArtMode: '', fullArtColor: 'FF0B0B0F', radius: 12, speed: 100, anim: '', osdZoom: false, osdFrom: '', bgs: [], hbItems: [], menuId: 9000,
+const TWEAK_DEF = { skipOff: false, busy: false, vol: false, topbar: false, hbTransparent: false, posters: false, fullArt: false, fullArtMode: '', fullArtColor: 'FF0B0B0F', radius: 12, speed: 100, anim: '', osdZoom: false, osdFrom: '', bgs: [], hbItems: [], menuId: 9000,
   hbGradients: false, winAnimOff: false, winAnimFiles: [], winAnimVis: false, hideInfo: [], hideItems: [], glass: false, osdHide: [], osdBarH: 0, osdClear: false };
 const LOOK_ONLY = ['radius', 'menuId', 'fullArtColor', 'fullArtMode', 'zoomReplace', 'winAnimVis'];
 function hasTweaks(t = {}) {
@@ -1352,6 +1352,12 @@ async function applySkin(id, t, { reload = true } = {}) {
       const xb = await exec(`cat ${q(sp + '/media/Textures.xbt')} 2>/dev/null`, { timeout: 180000 });
       if (xb.out.length > 16) { try { otherXbt = { buf: xb.out, files: xbt.parse(xb.out) }; otherExtra.xbt = new Set(otherXbt.files.keys()); } catch {} }
     }
+  }
+  if (t.skipOff) {
+    // which add-ons this skin calls are switched off or not installed right now
+    const refs = Object.keys(skin.addonRefs(files));
+    const st = await Promise.all(refs.map(a => rpc('Addons.GetAddonDetails', { addonid: a, properties: ['enabled'] }).then(r => r.addon.enabled !== false, () => false)));
+    t = { ...t, offAddons: refs.filter((a, i) => !st[i]) };
   }
   const { changed, report, assets = [] } = skin.applyAll(files, t, { dirs: p.dirs, res: [res.w, res.h], otherSkin, otherExtra });
   if (t.osdFrom && t.osdFrom !== id && !otherSkin) report.unshift({ ok: false, text: `OSD source ${t.osdFrom} is not installed; install it first` });

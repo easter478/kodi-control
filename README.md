@@ -32,6 +32,7 @@ All addresses, playlist links and logins in these pictures are dummy values.
   - Full-screen artwork, or artwork across the top only with a solid band behind the posters.
   - Transparent home bar, no top bar, faster or no animations.
   - Hide the busy spinner, the volume bar or individual info items.
+  - Skip calls to disabled add-ons: when a helper add-on the skin uses is switched off (for example Skin Info Service, which crashed Kodi on this box), its calls and lists get a `System.AddonIsEnabled` guard instead of logging "Unable to find plugin" each time. Aeon Nox's letter jump stays quiet and comes back by itself when the add-on is switched on again. Revert puts the original files back.
   - Custom backgrounds.
 - **OSD.**
   - Move the whole video OSD from another installed skin, with its fonts, colours, strings and icons. Tested across Aeon Nox SiLVO, Bald, Cupertino, Nimbus, Onyx, Umbrestuary and Estuary.
