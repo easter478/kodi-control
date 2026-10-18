@@ -58,6 +58,16 @@ h3{font:600 14px var(--head);text-transform:uppercase;letter-spacing:.06em;color
 .between{justify-content:space-between}
 .tog{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
 .tog:last-child{border:0}
+.subtabs{display:flex;gap:4px;padding:4px;border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+.subtabs button{border:0;background:transparent;color:var(--muted);font:inherit;font-weight:600;padding:8px 14px;border-radius:9px;cursor:pointer}
+.subtabs button.on{background:var(--primary);color:var(--on-primary)}
+.subtabs button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.pverdict{display:flex;gap:10px;align-items:center;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:var(--surface)}
+.pverdict.green{border-color:var(--accent)}.pverdict.amber{border-color:var(--warn)}.pverdict.red{border-color:var(--danger)}
+.tag.green{color:var(--accent);border-color:var(--accent)}.tag.amber{color:var(--warn);border-color:var(--warn)}.tag.red{color:var(--danger);border-color:var(--danger)}
+.psec{margin-top:16px}.psec h3 .tag{margin-left:8px;vertical-align:middle}
+.psec .why{font-size:13px;color:var(--muted);margin:0 0 8px}
+.bar{height:6px;border-radius:6px;background:var(--surface2);overflow:hidden;min-width:60px}.bar i{display:block;height:100%;background:var(--primary)}
 .card.stick{position:sticky;top:12px;align-self:start}
 .report.rep{max-height:280px;overflow:auto}
 .report.rep:not(:empty){margin-top:10px;padding-top:8px;border-top:1px solid var(--border)}
@@ -114,7 +124,7 @@ svg.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 @media (max-width:800px){.app{grid-template-columns:1fr}nav{flex-direction:row;overflow:auto}.conn,.brand{display:none}main{padding:16px}.g2{grid-template-columns:1fr}}
 
-.app{height:100vh;min-height:0}main{height:100vh}
+.app{height:100vh;min-height:0;overflow:hidden}main{height:100vh}nav{height:100vh;overflow-y:auto;box-sizing:border-box}nav button{flex-shrink:0}
 .dot.off{background:var(--danger);box-shadow:0 0 8px var(--danger)}
 .btn[disabled]{opacity:.5;pointer-events:none}
 .btn.danger{color:var(--danger);border-color:var(--danger)}
@@ -372,8 +382,8 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
     <div class="note" id="kmNote">Learn a key: press Learn, then press the button on the remote or keyboard within 10 seconds. Kodi debug logging is switched on for that moment only.</div>
     <pre class="log" id="kmPre" style="display:none"></pre></div>
   <div class="card" style="margin-top:16px"><div class="row between"><h3>Last key pressed</h3>
-      <div class="row"><span class="note">Watch while this page is open <span class="tag warn" title="Kodi debug logging is on while watching, which writes to the eMMC">writes debug log</span></span><div class="sw on" id="kwOn" role="switch" aria-label="Watch key presses"></div></div></div>
-    <div class="kw"><div class="kwKey" id="kwKey">–</div><div><div id="kwInfo" class="note" style="margin:0">Press any key on the remote or keyboard.</div>
+      <div class="row"><span class="note">Watch while this page is open <span class="tag warn" title="Kodi debug logging is on while watching, which writes to the eMMC">writes debug log</span></span><div class="sw" id="kwOn" role="switch" aria-label="Watch key presses"></div></div></div>
+    <div class="kw"><div class="kwKey" id="kwKey">–</div><div><div id="kwInfo" class="note" style="margin:0">Switch on "Watch while this page is open", then press any key on the remote or keyboard.</div>
       <button class="btn" id="kwAdd" style="margin-top:8px" disabled>Bind this key</button></div></div>
     <div class="scroll" style="max-height:160px;margin-top:10px"><table class="t" id="kwHist"></table></div>
     <div class="note" id="kwNote">Reads kodi.log over SSH about 3 times a second. Kodi debug logging is on only while this page is open (Kodi shows its debug overlay meanwhile).</div></div>
@@ -551,6 +561,31 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
 </section>
 
 <!-- CONNECTION -->
+<section class="page" id="perf">
+  <div class="row between"><h1>Performance</h1><div class="subtabs" role="tablist"><button class="on" data-pt="ov" role="tab">Overview</button><button data-pt="an" role="tab">Analyze</button><button data-pt="run" role="tab">Running now</button></div></div>
+  <p class="sub">Is anything wearing out the box's storage (eMMC) by writing too much, and what is heavy right now. Everything here only reads, and nothing is installed on the box; the clean-up buttons ask first.</p>
+  <div id="pf-ov" class="ptab">
+    <div class="pverdict" id="pvBanner"><span class="tag">–</span><span>Open this page while connected.</span></div>
+    <div class="grid" style="margin:12px 0 16px">
+      <div class="card"><div class="label">eMMC wear</div><div class="kpi" id="pvLife">–</div><div class="note" id="pvLifeN">&nbsp;</div></div>
+      <div class="card"><div class="label">Writing now</div><div class="kpi" id="pvWr">–</div><div class="note" id="pvWrN">&nbsp;</div></div>
+      <div class="card"><div class="label">kodi.log</div><div class="kpi" id="pvLog">–</div><div class="note" id="pvLogN">&nbsp;</div></div>
+      <div class="card"><div class="label">CPU · memory · temp</div><div class="kpi" id="pvSys">–</div><div class="note" id="pvSysN">&nbsp;</div></div>
+    </div>
+    <div class="card"><h3>Checks</h3><div class="report" id="pvItems" style="margin-top:0"></div><div class="note">Updates every 5 seconds while this page is open. Press Analyze for the full look: who writes, logs, thumbnails, databases and add-on data.</div></div>
+  </div>
+  <div id="pf-an" class="ptab" hidden>
+    <div class="card"><div class="row between"><div><h3 style="margin:0">Analyze</h3><div class="note" style="margin:2px 0 0">Watches the box for the time you pick, then looks through logs, thumbnails, databases and add-on data. Light on the box: it reads file sizes and /proc.</div></div>
+      <span class="row"><select id="anSecs" aria-label="How long to watch"><option value="30">Watch 30 s</option><option value="60" selected>Watch 1 min</option><option value="300">Watch 5 min</option><option value="600">Watch 10 min (catches periodic writers)</option></select><button class="btn p" id="anRun">Analyze</button></span></div>
+      <div class="pverdict" id="anBanner" style="margin-top:10px" hidden></div></div>
+    <div id="anOut"></div>
+  </div>
+  <div id="pf-run" class="ptab" hidden>
+    <div class="card"><div class="row between"><div><h3 style="margin:0">Running now</h3><div class="note" style="margin:2px 0 0">Processes on the box, the add-on scripts running inside Kodi, and what Kodi Control itself has running. Each marked heavy or light.</div></div><button class="btn p" id="runScan">Refresh</button></div></div>
+    <div id="runOut"><div class="empty" style="margin-top:12px">Press Refresh.</div></div>
+  </div>
+</section>
+
 <section class="page" id="ports">
   <div class="row between"><h1>Ports</h1><button class="btn p" id="ptScan">Scan ports</button></div>
   <p class="sub">Every port the box listens on, the program that owns it, and clashes with the ports Kodi and this app are set to use. Scans by itself when you open this page.</p>

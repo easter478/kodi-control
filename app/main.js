@@ -1621,7 +1621,16 @@ const handlers = {
     return notes.join(' · ');
   },
   'seek:enable': a => { if (!ssh) throw new Error('Not connected'); return seekEnable(a || {}); },
-  'seek:apply': async a => { if (!ssh) throw new Error('Not connected'); const notes = await handlers['seek:save']({ ...a, on: true }); return { report: [{ ok: true, text: notes }, ...(await seekEverywhere())] }; },
+  'seek:apply': async a => {
+    if (!ssh) throw new Error('Not connected');
+    // the skins only carry the box's look; frame step, delay and steps live in seek.json and Kodi's settings,
+    // so the skins are rewritten only when the look changed (each rewrite is several MB on the eMMC)
+    const lookOf = () => JSON.stringify({ ...SEEK_LOOK, ...((cfg.seek || {}).look || {}) });
+    const before = lookOf(), wasOn = !!(cfg.seek && cfg.seek.on);
+    const notes = await handlers['seek:save']({ ...a, on: true });
+    if (wasOn && lookOf() === before) return { report: [{ ok: true, text: notes }, { ok: true, text: 'The box looks the same, so the skins were left as they are (nothing rewritten on the box)' }] };
+    return { report: [{ ok: true, text: notes }, ...(await seekEverywhere())] };
+  },
   'seek:clearCache': async () => { await exec(`rm -rf ${q(KH + '/temp/kcseek')} /tmp/kcseek`); return true; },
   'undo:status': () => { if (!ssh) throw new Error('Not connected'); return undoStatus(); },
   'addons:remove': id => { if (!ssh) throw new Error('Not connected'); return removeAddon(id); },
@@ -1684,6 +1693,7 @@ const handlers = {
 };
 const needSsh = fn => async a => { if (!ssh) throw new Error('Not connected'); return fn(a); };
 const extra = features.make({ exec, sh, stream, q, rpc, builtin, cfg: () => cfg, saveCfg, kh: () => KH, has: () => HAS, dialog, win: () => win, app, send });
+for (const [ch, fn] of Object.entries(require('./perf').make({ exec, sh, q, rpc, kh: () => KH, cfg: () => cfg, saveCfg, app }))) handlers[ch] = needSsh(fn);
 for (const [ch, fn] of Object.entries(extra)) handlers[ch] = ch.startsWith('pick:') || ch === 'keymap:preview' ? fn : needSsh(fn);
 const markInstalled = id => { if (!(cfg.installed ||= []).includes(id)) { cfg.installed.push(id); saveCfg(); } };
 handlers['iftop:install'] = needSsh(async () => { const r = await extra['iftop:install'](); if (r.how === 'System Tools add-on') markInstalled('virtual.system-tools'); await probe(); return r; });
@@ -1754,4 +1764,8 @@ app.whenReady().then(async () => {
     });
   }
 });
-app.on('window-all-closed', () => { if (ssh) ssh.end(); app.quit(); });
+// closing while the key watch runs must not leave Kodi's debug logging on (it writes to the eMMC)
+app.on('window-all-closed', async () => {
+  if (ssh) { try { await Promise.race([handlers['keys:watch'](false), new Promise(r => setTimeout(r, 3000))]); } catch {} ssh.end(); }
+  app.quit();
+});

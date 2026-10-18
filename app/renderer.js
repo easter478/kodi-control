@@ -36,6 +36,7 @@ const pages = [['dashboard', 'Dashboard', '<rect x="3" y="3" width="7" height="9
   ['files', 'Pull files', '<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M12 10v6M9 13l3 3 3-3"/>'],
   ['media', 'Media & IPTV', '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>'],
   ['addons', 'Add-ons', '<path d="M10 3h4v4a2 2 0 104 0V7h3v5h-2a2 2 0 100 4h2v5h-5v-2a2 2 0 10-4 0v2H5v-5h2a2 2 0 100-4H5V7h5z"/>'],
+  ['perf', 'Performance', '<path d="M3 13a9 9 0 0118 0"/><path d="M12 13l4-4"/><path d="M5 19h14"/>'],
   ['logs', 'Crash logs', '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/>'],
   ['backup', 'Backup', '<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>'],
   ['themes', 'Themes', '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 000 18"/>'],
@@ -57,6 +58,7 @@ function show(id) {
   if (id === 'backup' && S.connected && !S.listed) { S.listed = true; loadBackups(); }
   if (id === 'ports' && S.connected) $('ptScan').click();
   if (id === 'addons' && S.connected) { adLoad(); unLoad(); }
+  try { if (id === 'perf') pfStart(); else pfStop(); } catch {}
   if (id === 'preview') pvVidStart(); else if (PVV && PVV.on) pvVidStop();
   if (id === 'preview') { pvLoop(); if (S.connected) kbCheck(); }
   if (id === 'osd' && S.connected && !THUMB) osdThumbLoad();
@@ -1457,6 +1459,7 @@ function guard(id, key, msg, when = () => true) { const el = $(id), orig = el.on
 guard('pvVidOn', 'video', 'The live video layer copies the TV picture from the box about 15 times a second. That uses box CPU and network while it is on.', () => !$('pvVidOn').classList.contains('on'));
 guard('skInstall', 'ffmpeg', 'This installs the FFmpeg Tools add-on (about 65 MB) on the box from the CoreELEC repository. Kodi asks you to confirm on the TV.');
 guard('ifInstall', 'iftop', 'This installs the System Tools add-on on the box from the CoreELEC repository. Kodi asks you to confirm on the TV.');
+guard('kwOn', 'debuglog', 'Watching keys switches Kodi debug logging on while the Keymaps page is open, which writes extra to the eMMC. It goes off when you leave the page or close Kodi Control.', () => !$('kwOn').classList.contains('on'));
 guard('kmLearn', 'debuglog', 'Learning a key switches Kodi debug logging on for a few seconds, which writes extra to the eMMC.');
 { const r = $('pvRate'), o = r.onchange; let last = r.value;
   r.onchange = e => { if (r.value === '0' && !heavyOk('fast', '"As fast as possible" asks Kodi for a screenshot again as soon as the last one arrives. That keeps the box busy.')) { r.value = last; return; } last = r.value; o.call(r, e); }; }
@@ -1598,3 +1601,146 @@ $('osdHelperSw').onclick = () => needConn() && act(null, async () => {
 });
 { const o = $('cHelperInstall').onclick; $('cHelperInstall').onclick = e => { const p = o && o.call($('cHelperInstall'), e); Promise.resolve(p).finally(() => setTimeout(cHelperState, 500)); }; }
 { const o = $('cHelperRemove').onclick; $('cHelperRemove').onclick = e => { const p = o && o.call($('cHelperRemove'), e); Promise.resolve(p).finally(() => setTimeout(cHelperState, 500)); }; }
+
+// ---------- Performance: Overview (live), Analyze (on demand), Running now ----------
+const PF = { tab: 'ov', t: null, ran: false };
+const LVL = { green: 'fine', amber: 'watch', red: 'act now' };
+const lvlTag = l => `<span class="tag ${l}">${LVL[l] || l}</span>`;
+const worst = ls => ls.includes('red') ? 'red' : ls.includes('amber') ? 'amber' : 'green';
+const lifeOf = s => { const v = String(s || '').split(/\s+/).map(x => parseInt(x, 16)).filter(n => !isNaN(n)); return v.length ? Math.max(...v) : null; };
+const lifeTxt = l => l == null ? 'not reported' : l <= 10 ? `${(l - 1) * 10}–${l * 10}% used` : 'past rated life';
+const ago = (t, now) => { const s = Math.max(0, now - t); return s < 90 ? Math.round(s) + ' s ago' : s < 5400 ? Math.round(s / 60) + ' min ago' : s < 172800 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' days ago'; };
+const perDay = (bytes, secs) => fmtBytes(Math.round(bytes / Math.max(1, secs) * 86400));
+const pfRows = (rows, head) => `<table class="t"><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr>${rows.join('') || `<tr><td class="empty" colspan="${head.length}">Nothing</td></tr>`}</table>`;
+const bar = (v, max) => `<div class="bar"><i style="width:${Math.round(100 * v / Math.max(1, max))}%"></i></div>`;
+const banner = (el, level, text) => { el.className = 'pverdict ' + level; el.hidden = false; el.innerHTML = `${lvlTag(level)}<span>${esc(text)}</span>`; };
+
+function pfTab(t) {
+  PF.tab = t;
+  $$('[data-pt]').forEach(b => { b.classList.toggle('on', b.dataset.pt === t); b.setAttribute('aria-selected', b.dataset.pt === t); });
+  $$('.ptab').forEach(p => p.hidden = p.id !== 'pf-' + t);
+  clearTimeout(PF.t);
+  if (t === 'ov') pfTick();
+  if (t === 'run' && !PF.ran) runScan();
+}
+$$('[data-pt]').forEach(b => b.onclick = () => pfTab(b.dataset.pt));
+function pfStart() { pfTab(PF.tab); }
+function pfStop() { clearTimeout(PF.t); }
+
+// ----- Overview -----
+async function pfTick() {
+  clearTimeout(PF.t);
+  if (curPage !== 'perf' || PF.tab !== 'ov') return;
+  if (!S.connected) { banner($('pvBanner'), 'amber', 'Not connected.'); return; }
+  try {
+    const o = await call('perf:overview');
+    const l = lifeOf(o.emmc.life);
+    $('pvLife').textContent = lifeTxt(l);
+    $('pvLifeN').textContent = `${o.emmc.name || o.emmc.dev} · ${fmtBytes(o.emmc.size)} · end-of-life flag ${o.emmc.eol === '0x01' ? 'normal' : o.emmc.eol || '–'}`;
+    $('pvWr').textContent = o.rate ? fmtBytes(Math.round(o.rate.wr)) + '/s' : 'measuring…';
+    $('pvWrN').textContent = o.rate ? `about ${perDay(o.rate.wr, 1)} a day at this rate · ${fmtBytes(o.disk.wr)} since boot (${Math.round(o.uptime / 3600 * 10) / 10} h)` : `${fmtBytes(o.disk.wr)} written since boot`;
+    $('pvLog').textContent = fmtBytes(o.log);
+    $('pvLogN').textContent = (o.rate ? `growing ${fmtBytes(Math.round(o.rate.log * 3600))} an hour` : 'measuring…') + (o.debug.overlay || o.debug.extra ? ' · debug logging ON' : ' · debug logging off');
+    $('pvSys').textContent = `${o.load[0]} · ${Math.round(100 - 100 * o.mem.avail / o.mem.total)}% · ${o.temp != null ? Math.round(o.temp) + ' °C' : '–'}`;
+    $('pvSysN').textContent = `load · memory used · hottest sensor · swap ${o.swap.some(x => /zram/.test(x)) ? 'in RAM (zram), no eMMC wear' : o.swap.length ? 'on ' + o.swap.join(', ') : 'none'}`;
+    const items = o.verdict.items;
+    const top = items.filter(i => i.level !== 'green');
+    banner($('pvBanner'), o.verdict.overall, top.length ? top.map(i => i.text).join(' · ') : 'Nothing is wearing out the box right now.');
+    $('pvItems').innerHTML = items.map(i => `<div>${lvlTag(i.level)}<span>${esc(i.text)}${i.k === 'debug' ? ' <button class="btn" data-pfdebug>Turn debug logging off</button>' : ''}</span></div>`).join('');
+    $$('[data-pfdebug]').forEach(b => b.onclick = () => act(b, async () => { toast(await call('perf:debugOff')); pfTick(); }));
+  } catch (e) { banner($('pvBanner'), 'amber', e.message); }
+  PF.t = setTimeout(pfTick, 5000);
+}
+
+// ----- Analyze -----
+$('anRun').onclick = e => needConn() && act(e.currentTarget, async () => {
+  const secs = +$('anSecs').value;
+  banner($('anBanner'), 'green', `Watching the box for ${secs >= 60 ? secs / 60 + ' min' : secs + ' s'}, then reading logs, thumbnails, databases and add-on data…`);
+  $('anOut').innerHTML = '';
+  const o = await call('perf:analyze', { secs });
+  anRender(o);
+});
+function anRender(o) {
+  const now = o.t, smp = o.sample, out = [];
+  const sec = (title, level, why, body) => out.push(`<div class="card psec"><h3>${title}${lvlTag(level)}</h3><p class="why">${why}</p>${body}</div>`);
+  const levels = [];
+  // who is writing
+  const day = smp.wr / Math.max(1, smp.secs) * 86400;
+  const wl = day > 5e9 ? 'red' : day > 1e9 ? 'amber' : 'green'; levels.push(wl);
+  const pmax = Math.max(1, ...smp.procs.map(p => p.wr));
+  sec('Who is writing', wl, `${fmtBytes(smp.wr)} written to the eMMC in ${smp.secs} s, about ${perDay(smp.wr, smp.secs)} a day at this rate. Under 1 GB a day is no concern for this chip.`,
+    `<h4 style="margin:6px 0">Processes while watching</h4>${pfRows(smp.procs.map(p => `<tr><td class="mono">${esc(p.comm)}</td><td>${fmtBytes(p.wr)}</td><td style="width:30%">${bar(p.wr, pmax)}</td><td>${p.cpu}% CPU</td></tr>`), ['Process', 'Written', '', 'CPU'])}
+     <h4 style="margin:12px 0 6px">Files changed while watching</h4>${pfRows(o.changed.map(c => `<tr><td class="mono">${esc(c[0])}</td><td>${c[1]} file${c[1] === 1 ? '' : 's'}</td><td>${fmtBytes(c[2])}</td></tr>`), ['Folder', 'Files', 'Size now'])}
+     <h4 style="margin:12px 0 6px">Changed in the last hour</h4>${pfRows(o.hour.map(c => `<tr><td class="mono">${esc(c[0])}</td><td>${c[1]} file${c[1] === 1 ? '' : 's'}</td><td>${fmtBytes(c[2])}</td></tr>`), ['Folder', 'Files', 'Size'])}
+     <h4 style="margin:12px 0 6px">Changed in the last day</h4>${pfRows(o.day.map(c => `<tr><td class="mono">${esc(c[0])}</td><td>${c[1]} file${c[1] === 1 ? '' : 's'}</td><td>${fmtBytes(c[2])}</td></tr>`), ['Folder', 'Files', 'Size'])}
+     <p class="note">A big file that keeps changing (a playlist re-downloaded every hour, a database rewritten on every guide refresh) is a steady writer even when the box looks idle.</p>`);
+  // logs
+  const lg = o.logs, dbg = o.debug.overlay || o.debug.extra || (lg.loglevel && +lg.loglevel >= 1);
+  const lr = smp.log / Math.max(1, smp.secs) * 3600;
+  const ll = dbg || lr > 1e6 ? 'amber' : 'green'; levels.push(ll);
+  const smax = Math.max(1, ...lg.sources.map(s => s[4]));
+  const crashB = lg.crash.reduce((a, c) => a + c[1], 0);
+  sec('Logs', ll, `kodi.log is ${fmtBytes(lg.size)} and grew ${fmtBytes(smp.log)} while watching (about ${fmtBytes(Math.round(lr))} an hour). Debug logging is ${dbg ? '<b>ON</b>, which writes many times more' : 'off'}. The previous session's log is ${fmtBytes(lg.old)}.`,
+    `${dbg ? '<div class="row" style="margin-bottom:8px"><button class="btn" id="anDebugOff">Turn debug logging off</button>' + (lg.loglevel && +lg.loglevel >= 1 ? '<span class="note" style="margin:0">advancedsettings.xml also sets &lt;loglevel&gt;' + esc(lg.loglevel) + ': edit it to 0 to stop debug at every start</span>' : '') + '</div>' : ''}
+     <h4 style="margin:6px 0">What writes the most lines (last ${lg.lines} lines)</h4>${pfRows(lg.sources.map(s => `<tr><td class="mono">${esc(s[0])}</td><td>${s[1]} lines</td><td>${s[2] ? s[2] + ' debug' : ''}${s[3] ? ' · <span style="color:var(--danger)">' + s[3] + ' errors</span>' : ''}</td><td>${fmtBytes(s[4])}</td><td style="width:22%">${bar(s[4], smax)}</td></tr>`), ['Source', 'Lines', 'Kind', 'Size', ''])}
+     <h4 style="margin:12px 0 6px">Crash logs</h4><div class="row"><span>${lg.crash.length} file${lg.crash.length === 1 ? '' : 's'}, ${fmtBytes(crashB)}${lg.crash.length ? ', newest ' + ago(lg.crash[0][2], now) : ''}</span>${lg.crash.length ? '<button class="btn" id="anCrash">Delete old crash logs</button>' : ''}</div>`);
+  // thumbnails
+  const th = o.thumbs, thl = th.sample > 20 && smp.secs >= 30 ? 'amber' : 'green'; levels.push(thl);
+  sec('Thumbnails', thl, `Kodi saves every poster and fanart it shows as a file, once. ${fmtBytes(th.bytes)} in ${th.files} files. Written while watching: ${th.sample}, last hour: ${th.hour}, last day: ${th.day}. ${th.sample > 20 ? 'Kodi is caching artwork right now (normal after a library scan; a concern only if it never stops).' : 'Not being written continuously.'}`,
+    `<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
+      <div><div class="label">Not used for 90 days</div><div class="kpi" style="font-size:18px">${th.unused90 ?? '–'}</div><div class="note">${th.unused90bytes != null ? fmtBytes(th.unused90bytes) : ''}</div></div>
+      <div><div class="label">Not used for a year</div><div class="kpi" style="font-size:18px">${th.unused365 ?? '–'}</div></div>
+      <div><div class="label">Not in Kodi's list</div><div class="kpi" style="font-size:18px">${th.orphans ?? '–'}</div><div class="note">${th.orphanBytes != null ? fmtBytes(th.orphanBytes) + ' left over' : ''}</div></div>
+      <div><div class="label">Since last Analyze</div><div class="kpi" style="font-size:18px">${o.since ? (o.since.thumbs >= 0 ? '+' : '') + fmtBytes(o.since.thumbs) : '–'}</div><div class="note">${o.since ? `${o.since.thumbFiles >= 0 ? '+' : ''}${o.since.thumbFiles} files in ${Math.round(o.since.hours * 10) / 10} h` : 'first run'}</div></div></div>
+     ${th.dberr ? `<p class="note">Texture database: ${esc(th.dberr)}</p>` : ''}
+     <p class="note">${th.bytes > 1e9 ? 'Large: Kodi\'s <span class="mono">imageres</span> and <span class="mono">fanartres</span> settings in advancedsettings.xml make new thumbnails smaller.' : 'Size is normal.'} Removing unused thumbnails is safest from Kodi itself (Settings → Media → Library → Clean library), so Kodi Control only reports them.</p>`);
+  // databases
+  const dmax = Math.max(1, ...o.dbs.map(d => d[1]));
+  sec('Databases', 'green', `Kodi rewrites a database file whenever its contents change. The TV guide (Epg, TV) changes on every guide refresh${o.epgUpdate ? ` — Kodi refreshes the guide every ${o.epgUpdate} min` : ''}.`,
+    pfRows(o.dbs.map(d => `<tr><td class="mono">${esc(d[0])}</td><td>${fmtBytes(d[1])}</td><td style="width:22%">${bar(d[1], dmax)}</td><td>${ago(d[2], now)}</td><td>${o.since && o.since.dbs[d[0]] != null ? (o.since.dbs[d[0]] >= 0 ? '+' : '') + fmtBytes(o.since.dbs[d[0]]) : ''}</td></tr>`), ['Database', 'Size', '', 'Last changed', 'Since last Analyze']));
+  // add-on data
+  const amax = Math.max(1, ...o.addonData.map(a => a[1]));
+  sec('Add-on data', 'green', 'Settings and caches each add-on keeps. A folder that grows between Analyzes and changed minutes ago is an add-on writing a cache.',
+    pfRows(o.addonData.map(a => `<tr><td class="mono">${esc(a[0])}</td><td>${fmtBytes(a[1])}</td><td style="width:22%">${bar(a[1], amax)}</td><td>${a[2]} files</td><td>${a[3] ? ago(a[3], now) : ''}</td><td>${o.since && o.since.addonData[a[0]] != null ? (o.since.addonData[a[0]] >= 0 ? '+' : '') + fmtBytes(o.since.addonData[a[0]]) : ''}</td></tr>`), ['Add-on', 'Size', '', 'Files', 'Last changed', 'Since last Analyze']));
+  // Kodi Control's own footprint
+  const mineB = o.mine.reduce((a, m) => a + m.bytes, 0);
+  sec('Kodi Control\'s own footprint', 'green', `What this app (and its earlier sessions) left on the box: ${fmtBytes(mineB)} in all. Space only; none of it is written continuously.`,
+    pfRows(o.mine.map((m, i) => `<tr><td>${esc(m.label)}<div class="note mono" style="margin:0">${esc(m.path)}${m.mtime ? ' · ' + ago(m.mtime, now) : ''}</div></td><td>${fmtBytes(m.bytes)}</td><td style="text-align:right;white-space:nowrap">${m.how === 'keep' ? '<span class="note">kept: Revert needs it</span>' : m.how === 'info' ? '' : `${m.how === 'move' ? `<button class="btn" data-pfmv="${i}">Move to PC</button>` : ''}<button class="btn" data-pfrm="${i}">Delete</button>`}</td></tr>`), ['What', 'Size', '']));
+  banner($('anBanner'), worst(levels), `Watched ${smp.secs} s: ${fmtBytes(smp.wr)} written (≈ ${perDay(smp.wr, smp.secs)} a day) · eMMC ${lifeTxt(lifeOf(o.emmc.life))} · ${o.verdict.items.filter(i => i.level !== 'green').map(i => i.text).join(' · ') || 'nothing wearing out the box'}`);
+  $('anOut').innerHTML = out.join('');
+  const again = () => $('anRun').click();
+  if ($('anDebugOff')) $('anDebugOff').onclick = e => act(e.currentTarget, async () => { toast(await call('perf:debugOff')); });
+  if ($('anCrash')) $('anCrash').onclick = e => act(e.currentTarget, async () => { if (!confirm(`Delete ${lg.crash.length} crash log${lg.crash.length === 1 ? '' : 's'} (${fmtBytes(crashB)}) from the box? Crash logs only matter while you are chasing a crash.`)) return; toast(await call('perf:crashLogs')); e.currentTarget.disabled = true; });
+  $$('[data-pfmv]').forEach(b => b.onclick = () => act(b, async () => { const m = o.mine[+b.dataset.pfmv]; if (!confirm(`Copy ${m.path} (${fmtBytes(m.bytes)}) to this PC, check it arrived whole, then delete it from the box?`)) return; toast(await call('perf:moveToPc', m.path)); b.closest('tr').style.opacity = .4; }));
+  $$('[data-pfrm]').forEach(b => b.onclick = () => act(b, async () => { const m = o.mine[+b.dataset.pfrm]; if (!confirm(`Delete ${m.path} (${fmtBytes(m.bytes)}) from the box? This cannot be undone.`)) return; toast(await call('perf:delete', m.path)); b.closest('tr').style.opacity = .4; }));
+  void again;
+}
+
+// ----- Running now -----
+const heavyOf = (cpu, rss) => cpu >= 20 ? 'red' : cpu >= 5 || rss > 300 * 1048576 ? 'amber' : 'green';
+const HEAVY = { red: 'heavy', amber: 'moderate', green: 'light' };
+async function runScan(btn) {
+  if (!S.connected) return;
+  PF.ran = true;
+  await act(btn || $('runScan'), async () => {
+    const [r, ad, sk] = await Promise.all([call('perf:running'), call('addons:list').catch(() => null), call('seek:status').catch(() => null)]);
+    const seekOn = sk ? !!sk.on : SK.on;
+    const mine = [];
+    const seek = r.procs.filter(p => /kcseek|ffmpeg-tools\/bin\/ffmpeg/.test(p.cmd));
+    mine.push(['Seek preview service', seekOn ? (seek.length ? `making frames now (${seek.length} ffmpeg)` : 'on, idle until you play a video') : 'off', seekOn ? (seek.length ? 'amber' : 'green') : 'green', 'osd']);
+    mine.push(['Live view video layer', PVV && PVV.on ? 'on (only while Live view is open)' : 'off', PVV && PVV.on ? 'amber' : 'green', 'preview']);
+    mine.push(['Key watch (debug log)', KW.on ? 'on while Keymaps is open' : 'off', KW.on ? 'amber' : 'green', 'keymaps']);
+    mine.push(['Dashboard polling', 'reads only, every few seconds while the app is open', 'green', 'dashboard']);
+    const tag = l => `<span class="tag ${l}">${HEAVY[l]}</span>`;
+    const procs = r.procs.map(p => { const l = heavyOf(p.cpu, p.rss); return `<tr><td>${tag(l)}</td><td class="mono">${esc(p.comm)}<div class="note" style="margin:0;max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.cmd)}">${esc(p.cmd)}</div></td><td>${p.cpu}%</td><td>${fmtBytes(p.rss)}</td><td>${p.wr ? fmtBytes(p.wr) : ''}</td></tr>`; });
+    const adds = ad ? ad.list.filter(a => a.running).sort((a, b) => b.cpu - a.cpu || b.threads - a.threads).map(a => { const l = a.cpu >= 10 ? 'red' : a.cpu >= 2 ? 'amber' : 'green'; return `<tr><td>${tag(l)}</td><td>${esc(a.name)}<div class="note mono" style="margin:0">${esc(a.id)}</div></td><td>${a.type.replace(/^xbmc\.(python\.)?/, '')}</td><td>${a.threads || ''}</td><td>${a.cpu}%</td><td>${a.mem ? fmtBytes(a.mem) : 'inside Kodi'}</td></tr>`; }) : [];
+    $('runOut').innerHTML = `<div class="grid" style="margin:12px 0"><div class="card"><div class="label">Whole box CPU</div><div class="kpi">${r.cpuAll}%</div><div class="note">over 2 s · load ${r.load.join(' ')}</div></div>
+      <div class="card"><div class="label">Memory free</div><div class="kpi">${fmtBytes(r.mem.avail)}</div><div class="note">of ${fmtBytes(r.mem.total)}</div></div>
+      <div class="card"><div class="label">Add-ons running</div><div class="kpi">${ad ? ad.list.filter(a => a.running).length : '–'}</div><div class="note">inside Kodi's own process</div></div></div>
+      <div class="card"><h3>Started by Kodi Control</h3>${pfRows(mine.map(m => `<tr><td>${tag(m[2])}</td><td>${esc(m[0])}</td><td class="note">${esc(m[1])}</td><td style="text-align:right"><button class="btn" data-go="${m[3]}">Open</button></td></tr>`), ['', 'What', 'State', ''])}</div>
+      <div class="card psec"><h3>Processes</h3><p class="why">Everything using CPU, more than 20 MB of memory, or writing, over 2 seconds. Kodi itself (kodi.bin) carries every add-on, the skin and video playback.</p>${pfRows(procs, ['', 'Process', 'CPU', 'Memory', 'Written'])}</div>
+      <div class="card psec"><h3>Add-on scripts and services in Kodi</h3><p class="why">Python scripts, services and plugins running inside Kodi, by CPU over 1 second. Turn one off on the Add-ons page.</p>${pfRows(adds, ['', 'Add-on', 'Type', 'Threads', 'CPU', 'Memory'])}</div>`;
+    $$('[data-go]').forEach(b => b.onclick = () => show(b.dataset.go));
+  });
+}
+$('runScan').onclick = e => needConn() && runScan(e.currentTarget);

@@ -26,8 +26,10 @@ A Windows desktop app for managing a Kodi box (CoreELEC, LibreELEC, OSMC or any 
     - One switch for all of Kodi: it is patched into every skin in your profile at once (built-in skins get it when you switch to them from Kodi Control). It works from the seek bar and from the OSD's own skip buttons, which are turned into step seeks.
     - Switching it off takes it out of every skin and puts the seek delay, seek steps and frame cache back to Kodi's defaults. Its options show only while it is on.
     - Optional RAM-only frame cache: nothing written to the eMMC.
+    - Saving seek settings only rewrites the skins when the box's look changed.
     - Subtitles are hidden while the preview box is up and come back after the jump (option, on by default).
 - **Keymaps.** An editor for every Kodi window, with key capture from a live "last key" view. Works with the Keymap Editor add-on.
+  - The "last key" watch is off by default, because it turns on Kodi debug logging (which writes to the eMMC). It is switched off again when the app closes.
   - Import every current keymap (including the add-on's gen.xml) into your bindings.
   - "What each key does now": every binding Kodi loads, its defaults included, with the file it comes from and the ones a later file overrides. Sort it, filter it by device, and edit any binding with every action the Keymap Editor offers.
 - **Live view.** A near-live screenshot of the TV, plus a remote control.
@@ -38,6 +40,11 @@ A Windows desktop app for managing a Kodi box (CoreELEC, LibreELEC, OSMC or any 
   - Posters from a USB drive.
   - Download M3U playlists, send them from the PC, or browse the box for them.
   - Back up playlists and set up PVR IPTV Simple.
+- **Performance.** Is anything wearing out the box's eMMC? Everything here only reads; clean-up buttons ask first.
+  - Overview: eMMC wear (JEDEC life estimate), write rate, CPU, memory, swap, temperature and disk use, refreshed every 5 s.
+  - Analyze: samples writes for a chosen time and shows which folders changed, log size and what fills it, thumbnail count and growth (unused and orphaned ones too), databases and add-on data, and what Kodi Control itself keeps on the box. It compares with the previous Analyze.
+  - Running now: heavy and light processes, add-ons running inside Kodi, and what Kodi Control has running.
+  - Fixes: switch debug logging off, delete old crash logs, delete or move old files to this PC.
 - **Logs.** Crash summaries and grouped errors with likely causes.
 - **Backup & restore.** Each of these is a separate option:
   - Skin settings, installed skins and repositories.
