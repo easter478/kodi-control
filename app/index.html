@@ -88,7 +88,8 @@ th{color:var(--muted);font-weight:500;font-size:12px;text-transform:uppercase}
 .tv{aspect-ratio:16/9;border-radius:var(--radius);background:linear-gradient(160deg,#20304a,#0b0f18);position:relative;overflow:hidden;border:1px solid var(--border)}
 .kbpop{position:fixed;inset:0;display:flex;align-items:flex-start;justify-content:center;padding-top:14vh;background:#0008;z-index:50}
 .kbpop[hidden]{display:none}
-.ti-wrap{display:flex;gap:14px;min-height:0;flex:1}.ti-list{flex:1;overflow-y:auto;max-height:58vh;border:1px solid var(--border);border-radius:10px}.ti-list .empty{padding:14px}.ti-row{display:flex;gap:8px;align-items:center;padding:7px 10px;cursor:pointer;border-bottom:1px solid var(--border)}.ti-row:hover,.ti-row:focus-visible{background:var(--surface2)}.ti-row.sel{background:color-mix(in srgb,var(--primary) 22%,transparent)}.ti-row .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ti-ed{width:360px;display:flex;flex-direction:column;gap:7px;overflow-y:auto;max-height:58vh;padding-right:4px}.ti-ed[hidden],#tiPop .btn[hidden]{display:none}.ti-f{display:flex;flex-direction:column;gap:4px;font-size:13px}.ti-poster{width:64px;height:96px;object-fit:cover;border-radius:8px;background:var(--surface2)}.ti-name{font-weight:600;font-size:16px;overflow-wrap:anywhere}.ti-font{padding:8px 12px;border:1px solid var(--border);border-radius:10px}
+.tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}.tcard{display:flex;flex-direction:column;gap:8px}.tcard h3{margin:0}.tcard .note{flex:1;margin:0}.ti-ic{width:28px;height:28px;color:var(--primary)}kbd{font:12px ui-monospace,monospace;padding:3px 7px;border:1px solid var(--border);border-bottom-width:2px;border-radius:6px;color:var(--muted)}
+.ti-wrap{display:flex;gap:14px;min-height:0;flex:1}.ti-list{flex:1;overflow-y:auto;max-height:58vh;border:1px solid var(--border);border-radius:10px}.ti-list .empty{padding:14px}.ti-row{display:flex;gap:8px;align-items:center;padding:7px 10px;cursor:pointer;border-bottom:1px solid var(--border)}.ti-row:hover,.ti-row:focus-visible{background:var(--surface2)}.ti-row.sel{background:color-mix(in srgb,var(--primary) 22%,transparent)}.ti-row .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ti-ed{width:360px;display:flex;flex-direction:column;gap:7px;overflow-y:auto;max-height:58vh;padding-right:4px}.ti-ed[hidden],#tiPop .btn[hidden],#upPop .btn[hidden]{display:none}.ti-f{display:flex;flex-direction:column;gap:4px;font-size:13px}.ti-poster{width:64px;height:96px;object-fit:cover;border-radius:8px;background:var(--surface2)}.ti-name{font-weight:600;font-size:16px;overflow-wrap:anywhere}.ti-font{padding:8px 12px;border:1px solid var(--border);border-radius:10px}
 .kbpop .card{width:min(520px,92vw)}
 .othumb{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px;font:500 12px "Fira Sans";color:#fff}
 .othumb .ob{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px;border-radius:8px;min-width:30px}
@@ -179,7 +180,7 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
 <body>
 <div class="app">
 <nav id="nav">
-  <div class="brand"><svg class="i" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 22h8M12 18v4"/></svg>Kodi Control</div>
+  <div class="brand"><img src="logo.png" alt="" width="26" height="26">Kodi Control</div>
 </nav>
 <main>
 
@@ -348,6 +349,19 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
 
 
 <!-- LIVE VIEW -->
+<section class="page" id="tools">
+  <h1>Tools</h1>
+  <p class="sub">One-off jobs for the box and the library. Each opens its own window; the keyboard shortcuts work from any page.</p>
+  <div class="tgrid">
+    <div class="card tcard"><svg class="i ti-ic" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg><h3>Edit titles</h3><p class="note">Rename a movie or TV show straight in Kodi's library: no .nfo, the artwork stays, and every change can be put back. Also fixes Korean, Japanese and Chinese titles showing as squares.</p><div class="row between"><kbd>Ctrl+E</kbd><button class="btn p" data-tool="titles">Open</button></div></div>
+    <div class="card tcard"><svg class="i ti-ic" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg><h3>Make local NFO files</h3><p class="note">Kodi-format .nfo files from your library, next to the media on the box or into a folder on this PC.</p><div class="row between"><kbd>Ctrl+N</kbd><button class="btn p" data-tool="nfo">Open</button></div></div>
+    <div class="card tcard"><svg class="i ti-ic" viewBox="0 0 24 24"><path d="M3 8a2 2 0 012-2h2l2-3h6l2 3h2a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><circle cx="12" cy="13" r="4"/></svg><h3>Screenshot tool</h3><p class="note">Take a screenshot of the TV, then copy it or save it as a PNG.</p><div class="row between"><kbd>Ctrl+Shift+S</kbd><button class="btn p" data-tool="shot">Open</button></div></div>
+    <div class="card tcard"><svg class="i ti-ic" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 00-2-2H5a2 2 0 00-2 2v9a2 2 0 002 2h3"/></svg><h3>Copy TV screenshot</h3><p class="note">Straight to the clipboard, ready to paste anywhere.</p><div class="row between"><kbd>Ctrl+Shift+C</kbd><button class="btn p" data-tool="shot:copy">Copy</button></div></div>
+    <div class="card tcard"><svg class="i ti-ic" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg><h3>Type text into Kodi</h3><p class="note">Type with this keyboard into whatever field has focus on the TV, such as a search box.</p><div class="row between"><kbd>Ctrl+T</kbd><button class="btn p" data-tool="type">Open</button></div></div>
+    <div class="card tcard"><svg class="i ti-ic" viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg><h3>Check for updates</h3><p class="note">Compares this app with the latest release on GitHub, and can download and install it. Also in the Help menu.</p><div class="row between"><span></span><button class="btn p" data-tool="update">Check</button></div></div>
+  </div>
+</section>
+
 <section class="page" id="preview">
   <div class="row between"><h1>Live view</h1>
     <div class="row"><span class="note">Live</span><div class="sw on" id="pvLive"></div>
@@ -655,6 +669,13 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
       </div></div>
     <div class="note" id="tiCount"></div>
   </div>
+</div>
+<div class="kbpop" id="upPop" role="dialog" aria-modal="true" aria-labelledby="upTitle" hidden>
+  <div class="card" style="width:min(600px,94vw)"><div class="row between"><h3 id="upTitle" style="margin:0">Check for updates</h3><button class="btn" data-close="upPop" aria-label="Close">✕</button></div>
+    <div id="upState" class="report" style="margin:10px 0" aria-live="polite"></div>
+    <ul id="upList" class="note" style="margin:0 0 10px;padding-left:18px"></ul>
+    <div class="bar" id="upBarW" hidden><i id="upBar" style="width:0"></i></div>
+    <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn p" id="upGo" hidden>Download</button><button class="btn" id="upAgain">Check again</button><button class="btn" id="upPage">Release page</button><span class="note" id="upNote"></span></div></div>
 </div>
 <div class="kbpop" id="nfoPop" role="dialog" aria-modal="true" aria-labelledby="nfoTitle" hidden>
   <div class="card"><div class="row between"><h3 id="nfoTitle">Make local NFO files</h3><button class="btn" data-close="nfoPop" aria-label="Close">✕</button></div>

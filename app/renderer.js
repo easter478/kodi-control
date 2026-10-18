@@ -31,6 +31,7 @@ const I = p => `<svg class="i" viewBox="0 0 24 24">${p}</svg>`;
 const pages = [['dashboard', 'Dashboard', '<rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/>'],
   ['skin', 'Skin tweaks', '<path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/>'],
   ['osd', 'OSD themes', '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 15h12"/>'],
+  ['tools', 'Tools', '<path d="M14.7 6.3a4 4 0 00-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 005.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/>'],
   ['preview', 'Live view', '<rect x="2" y="4" width="20" height="13" rx="2"/><circle cx="12" cy="10.5" r="2.5"/><path d="M8 21h8"/>'],
   ['keymaps', 'Keymaps', '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>'],
   ['files', 'Pull files', '<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M12 10v6M9 13l3 3 3-3"/>'],
@@ -341,7 +342,7 @@ document.addEventListener('keydown', e => {
 // ---------- menu bar tools ----------
 const pop = (id, on) => { $(id).hidden = !on; if (on) setTimeout(() => ($(id).querySelector('button.p') || $(id).querySelector('button')).focus(), 30); };
 $$('[data-close]').forEach(b => b.onclick = () => pop(b.dataset.close, false));
-document.addEventListener('keydown', e => { if (e.key === 'Escape') ['tiPop', 'nfoPop', 'shotPop', 'kePop'].forEach(id => { if (!$(id).hidden) pop(id, false); }); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') ['upPop', 'tiPop', 'nfoPop', 'shotPop', 'kePop'].forEach(id => { if (!$(id).hidden) pop(id, false); }); });
 async function copyImage(src, btn) {
   if (!src) return toast('No screenshot yet.', true);
   try { await call('clip:image', src); toast('Screenshot copied. Paste it anywhere.'); } catch (e) { toast(e.message, true); }
@@ -439,7 +440,15 @@ $('tiUndoAll').onclick = e => needConn() && act(e.currentTarget, async () => {
   if (!confirm('Put every title changed here back to what it was?')) return;
   toast(await call('titles:undo')); $('tiLoad').click();
 });
-window.kc.on('menu', async id => {
+const SHORTCUTS = { 'ctrl+e': 'titles', 'ctrl+n': 'nfo', 'ctrl+shift+s': 'shot', 'ctrl+shift+c': 'shot:copy', 'ctrl+t': 'type' };
+document.addEventListener('keydown', e => {
+  if (!e.ctrlKey || e.altKey || e.metaKey) return;
+  const id = SHORTCUTS[(e.shiftKey ? 'ctrl+shift+' : 'ctrl+') + e.key.toLowerCase()];
+  if (id) { e.preventDefault(); runTool(id); }
+});
+document.addEventListener('click', e => { const b = e.target.closest('[data-tool]'); if (b) runTool(b.dataset.tool); });
+window.kc.on('menu', id => runTool(id));
+async function runTool(id) {
   if (id.startsWith('page:')) return show(id.slice(5));
   if (id === 'nfo') return pop('nfoPop', true);
   if (id === 'titles') { pop('tiPop', true); return tiFont(); }
@@ -447,7 +456,46 @@ window.kc.on('menu', async id => {
   if (id === 'shot:copy') { if (!needConn()) return; try { const src = await call('preview:shot'); await copyImage(src); } catch (e) { toast(e.message, true); } return; }
   if (id === 'type') { kbHidden = false; return kbShow({ title: 'Type into the field that has focus on the TV' }); }
   if (id === 'ports') show('ports');
+  if (id === 'update') { pop('upPop', true); return upCheck(); }
+}
+
+// ---------- Help → Check for updates ----------
+const UP = { r: null, file: '' };
+const upDate = d => d ? new Date(d).toLocaleString() : '?';
+async function upCheck() {
+  UP.r = null; UP.file = '';
+  $('upGo').hidden = true; $('upBarW').hidden = true; $('upList').innerHTML = ''; $('upNote').textContent = '';
+  report($('upState'), [{ text: 'Checking GitHub…' }]);
+  try {
+    const r = UP.r = await call('update:check');
+    if (r.upToDate === true) report($('upState'), [{ ok: true, text: r.ahead ? `This copy is newer than the one on GitHub (published ${upDate(r.published)}).` : `You have the latest Kodi Control (published ${upDate(r.published)}).` }]);
+    else if (r.upToDate === false) {
+      report($('upState'), [{ bad: true, text: `A newer Kodi Control is on GitHub: published ${upDate(r.published)}, ${fmtBytes(r.size)}.` }]);
+      $('upList').innerHTML = r.commits.length ? '<li><b>What changed</b></li>' + r.commits.map(c => `<li>${esc(c.msg)} <span class="mono">${esc(c.sha)}</span></li>`).join('') : '';
+      $('upGo').hidden = false; $('upGo').textContent = r.canInstall ? 'Download and install' : 'Download';
+    } else report($('upState'), [{ text: `Running from source, so there is no .exe to compare. The latest release was published ${upDate(r.published)}.` }]);
+  } catch (e) { report($('upState'), [{ bad: true, text: 'Could not check: ' + e.message }]); }
+}
+$('upAgain').onclick = upCheck;
+$('upPage').onclick = () => window.open(UP.r ? UP.r.page : 'https://github.com/easter478/kodi-control/releases/latest');
+$('upGo').onclick = e => act(e.currentTarget, async () => {
+  if (UP.file) {
+    if (!confirm('Kodi Control closes, swaps in the new version and opens it again. Continue?')) return;
+    return call('update:install');
+  }
+  $('upBarW').hidden = false; $('upBar').style.width = '0';
+  const r = await call('update:download');
+  UP.file = r.file;
+  if (r.canInstall) { $('upGo').textContent = 'Restart with the new version'; $('upNote').textContent = 'Downloaded and checked against GitHub\'s checksum.'; }
+  else { $('upGo').hidden = true; $('upNote').textContent = 'Saved to ' + r.file; }
 });
+window.kc.on('progress', p => {
+  if (p.op !== 'update') return;
+  $('upBar').style.width = Math.round(p.got * 100 / (p.total || 1)) + '%';
+  $('upNote').textContent = `${fmtBytes(p.got)} of ${fmtBytes(p.total)}`;
+});
+// quietly look once at start-up; only says something when there is an update
+setTimeout(() => call('update:check').then(r => { if (r.upToDate === false) toast('A newer Kodi Control is available: Tools → Check for updates'); }).catch(() => {}), 15000);
 
 // ---------- ports on the box ----------
 $('ptScan').onclick = e => needConn() && act(e.currentTarget, async () => {

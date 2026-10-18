@@ -80,7 +80,8 @@ function make(ctx) {
   let shotN = 0;
   async function screenshot() {
     const SHOT = `/tmp/kodicontrol-shot-${process.pid}-${++shotN % 1000}.png`;
-    await builtin(`TakeScreenshot(${SHOT},sync)`);
+    // Kodi 22 dropped the 'sync' flag (it logs an error each time); the IEND poll below waits for the file anyway
+    await builtin(`TakeScreenshot(${SHOT})`);
     // done when the PNG ends with its IEND chunk (last 8 bytes = "IEND" + CRC); size-stable for 3 polls as a fallback
     const r = await exec(`i=0; last=-1; same=0; while [ $i -lt 160 ]; do s=$(stat -c %s ${SHOT} 2>/dev/null || echo 0); if [ "$s" -gt 0 ]; then [ "$(tail -c 8 ${SHOT} | head -c 4)" = IEND ] && break; if [ "$s" = "$last" ]; then same=$((same+1)); [ $same -ge 3 ] && break; else same=0; fi; fi; last=$s; i=$((i+1)); sleep 0.03; done; cat ${SHOT}; rm -f ${SHOT}`, { timeout: 12000 });
     if (r.out.length < 100) throw new Error('Kodi did not write a screenshot');

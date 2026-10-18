@@ -59,7 +59,8 @@ async function rpc(method, params) {
 }
 async function builtin(cmd) {
   calls.builtin.push(cmd);
-  const m = /^TakeScreenshot\(([^,]+),sync\)$/.exec(cmd);
+  // Kodi 22 logs an error for the old ",sync" flag, so only the plain form is answered
+  const m = /^TakeScreenshot\(([^,)]+)\)$/.exec(cmd);
   // write the "PNG" in two steps so the size-stable poll has to wait for it
   if (m) setTimeout(() => exec(`printf '\\211PNG' > ${q(m[1])}; sleep 0.1; head -c 4000 /dev/zero >> ${q(m[1])}; printf 'IENDcrc!' >> ${q(m[1])}`), 50);
   if (cmd === 'ToggleDebug') settings['debug.showloginfo'] = !settings['debug.showloginfo'];

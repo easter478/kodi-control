@@ -5,6 +5,7 @@
   "main": "app/main.js",
   "scripts": {
     "app": "electron .",
+    "predist": "node scripts/stamp.js",
     "dist": "electron-builder --win portable",
     "test": "node test/run.js"
   },
@@ -15,7 +16,7 @@
     "appId": "com.local.kodicontrol",
     "productName": "Kodi Control",
     "files": ["app/**/*", "package.json"],
-    "win": { "target": "portable" },
+    "win": { "target": "portable", "icon": "build/icon.ico" },
     "portable": { "artifactName": "KodiControl.exe" },
     "directories": { "output": "release" }
   },

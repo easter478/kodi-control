@@ -219,7 +219,7 @@ async function builtin(cmd) {
 
 // ---------- helper add-on ----------
 const HELPER_XML = `<?xml version="1.0" encoding="UTF-8"?>
-<addon id="script.kodicontrol" name="Kodi Control helper" version="1.2.0" provider-name="Kodi Control">
+<addon id="script.kodicontrol" name="Kodi Control helper" version="1.2.1" provider-name="Kodi Control">
   <requires><import addon="xbmc.python" version="3.0.0"/></requires>
   <extension point="xbmc.python.script" library="default.py"/>
   <extension point="xbmc.service" library="service.py" start="login"/>
@@ -290,7 +290,9 @@ def secs(s):
         for part in s.strip().split(':'): n = n * 60 + int(part)
         return n
     except Exception: return -1
-PROXY = {'port': 0, 'files': {}}
+PROXY = {'port': 0, 'files': {}, 'srv': None}
+# set when Kodi asks the service to stop: every thread checks it, so Kodi never has to kill the script
+STOP = threading.Event()
 def proxy():
     # ffmpeg here can't open smb:// or nfs://, Kodi can: a tiny HTTP server on 127.0.0.1 serves the file
     # through xbmcvfs with Range support, so ffmpeg seeks in it without any share password leaving Kodi
@@ -312,15 +314,15 @@ def proxy():
                 if m: self.send_header('Content-Range', 'bytes %d-%d/%d' % (a, b, size))
                 self.end_headers()
                 f.seek(a, 0); left = b - a + 1
-                while left > 0:
+                while left > 0 and not STOP.is_set():
                     d = f.readBytes(min(262144, left))
                     if not d: break
                     self.wfile.write(d); left -= len(d)
             except Exception: pass
             finally: f.close()
     srv = ThreadingHTTPServer(('127.0.0.1', 0), H); srv.daemon_threads = True
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    PROXY['port'] = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, kwargs={'poll_interval': 0.2}, daemon=True).start()
+    PROXY['port'], PROXY['srv'] = srv.server_address[1], srv
     return PROXY['port']
 def source(f):
     # Kodi's "url|Header=value&..." form -> ffmpeg input + headers; local paths and http(s) go straight in,
@@ -364,12 +366,16 @@ class Frames(threading.Thread):
         if self.hdr: cmd += ['-headers', self.hdr]
         cmd += ['-ss', str(b), '-noaccurate_seek', '-i', self.url, '-frames:v', '1', '-an', '-sn', '-threads', '1', '-vf', 'scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d' % (self.width, self.height, self.width, self.height), '-q:v', '5', '-y', p + '.tmp.jpg']
         try:
-            subprocess.run(cmd, timeout=20, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            pr = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            end = time.time() + 20
+            while pr.poll() is None:
+                if self.stop or STOP.is_set() or time.time() > end: pr.kill(); pr.wait(); return
+                time.sleep(0.05)
             if os.path.exists(p + '.tmp.jpg') and os.path.getsize(p + '.tmp.jpg') > 0: os.replace(p + '.tmp.jpg', p); self.bad = 0
             else: self.bad += 1
         except Exception: self.bad += 1
     def run(self):
-        while not self.stop:
+        while not self.stop and not STOP.is_set():
             if self.want is not None:
                 b, self.want = self.want, None
                 self.make(b); continue
@@ -436,6 +442,11 @@ while not mon.abortRequested():
     elif last and now - last > 0.4:
         clear(); last = 0
     mon.waitForAbort(0.1)
+STOP.set()
+if gen: gen.stop = True; gen.ev.set(); gen.join(2)
+if PROXY['srv']:
+    try: PROXY['srv'].shutdown(); PROXY['srv'].server_close()
+    except Exception: pass
 clear()
 `;
 async function ensureHelper() {
@@ -1112,7 +1123,11 @@ function cause(m, ctx) {
   if (/Timeout|timed out/i.test(s)) parts.push('timeout');
   if (/429/.test(m)) parts.push('rate limited (429)');
   else if (/\b40[134]\b/.test(m) && http) parts.push('HTTP error');
-  if (/duplicate.*id|control.*id/i.test(m)) parts.push('skin XML control id clash');
+  if (/duplicate\b.*\bid\b|\bcontrol (?:with )?id\b/i.test(m)) parts.push('skin XML control id clash');
+  if (/didn't stop in \d+ seconds/.test(m)) parts.push('add-on slow to stop');
+  if (/Unable to find plugin/.test(m)) parts.push('add-on disabled or missing');
+  if (/letter_jump/.test(m)) parts.push('skin calls a disabled add-on');
+  if (/is not playable|skipping unplayable/.test(m)) parts.push('no playable source found');
   if (/out of memory|oom/i.test(s)) parts.push('out of memory');
   return parts.join(' · ');
 }
@@ -1695,6 +1710,7 @@ const handlers = {
 const needSsh = fn => async a => { if (!ssh) throw new Error('Not connected'); return fn(a); };
 const extra = features.make({ exec, sh, stream, q, rpc, builtin, cfg: () => cfg, saveCfg, kh: () => KH, has: () => HAS, dialog, win: () => win, app, send });
 for (const [ch, fn] of Object.entries(require('./perf').make({ exec, sh, q, rpc, kh: () => KH, cfg: () => cfg, saveCfg, app }))) handlers[ch] = needSsh(fn);
+for (const [ch, fn] of Object.entries(require('./update').make({ app, send: p => send('progress', p) }))) handlers[ch] = fn;
 for (const [ch, fn] of Object.entries(require('./titles').make({ rpc, sh, q, cfg: () => cfg, saveCfg, listSkins, skinInfo, artData, builtin }))) handlers[ch] = needSsh(fn);
 for (const [ch, fn] of Object.entries(extra)) handlers[ch] = ch.startsWith('pick:') || ch === 'keymap:preview' ? fn : needSsh(fn);
 const markInstalled = id => { if (!(cfg.installed ||= []).includes(id)) { cfg.installed.push(id); saveCfg(); } };
@@ -1725,24 +1741,15 @@ app.whenReady().then(async () => {
     if (ssh) ssh.end();
     return app.exit(0);
   }
-  // menu bar: tools that open from any page; each item tells the page which tool to open
+  // menu bar: each item tells the page what to open (the tools themselves live on the Tools tab, shortcuts in renderer.js)
   const tool = id => () => win && win.webContents.send('menu', id);
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { label: 'File', submenu: [{ label: 'Connection…', click: tool('page:conn') }, { label: 'Backups…', click: tool('page:backup') }, { type: 'separator' }, { role: 'quit' }] },
-    { label: 'Tools', submenu: [
-      { label: 'Edit titles…', accelerator: 'CmdOrCtrl+E', click: tool('titles') },
-      { label: 'Make local NFO files…', accelerator: 'CmdOrCtrl+N', click: tool('nfo') },
-      { label: 'Screenshot tool…', accelerator: 'CmdOrCtrl+Shift+S', click: tool('shot') },
-      { label: 'Copy TV screenshot', accelerator: 'CmdOrCtrl+Shift+C', click: tool('shot:copy') },
-      { type: 'separator' },
-      { label: 'Type text into Kodi…', accelerator: 'CmdOrCtrl+T', click: tool('type') },
-      { label: 'Ports on the box', click: tool('ports') },
-    ] },
+    { label: 'File', submenu: [{ label: 'Connection…', click: tool('page:conn') }, { label: 'Backups…', click: tool('page:backup') }, { label: 'Tools…', click: tool('page:tools') }, { type: 'separator' }, { role: 'quit' }] },
     { label: 'View', submenu: [{ role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
-    { label: 'Help', submenu: [{ label: 'Kodi Control on GitHub', click: () => shell.openExternal('https://github.com/easter478/kodi-control') }] },
+    { label: 'Help', submenu: [{ label: 'Check for updates…', click: tool('update') }, { type: 'separator' }, { label: 'Kodi Control on GitHub', click: () => shell.openExternal('https://github.com/easter478/kodi-control') }] },
   ]));
   win = new BrowserWindow({
-    width: 1360, height: 880, minWidth: 900, minHeight: 600, backgroundColor: '#0B1020', title: 'Kodi Control', autoHideMenuBar: false, show: !process.argv.includes('--shots'),
+    width: 1360, height: 880, minWidth: 900, minHeight: 600, backgroundColor: '#0B1020', title: 'Kodi Control', icon: path.join(__dirname, 'icon.png'), autoHideMenuBar: false, show: !process.argv.includes('--shots'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
   win.loadFile(path.join(__dirname, 'index.html'));

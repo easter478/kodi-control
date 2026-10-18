@@ -1,3 +1,5 @@
+<img src="docs/icon.png" alt="Kodi Control icon" width="128" align="right">
+
 # Kodi Control
 
 A Windows desktop app for managing a Kodi box (CoreELEC, LibreELEC, OSMC or any Linux Kodi) over SSH: a live dashboard, skin tweaks, OSD transplants between skins, keymaps, logs, IPTV playlists and full backups.
@@ -15,6 +17,7 @@ All addresses, playlist links and logins in these pictures are dummy values.
 | <img src="docs/screenshots/performance-running.png" alt="Performance: running now" width="420"><br>Performance: running now | <img src="docs/screenshots/edit-titles.png" alt="Tools: Edit titles" width="420"><br>Tools: Edit titles |
 | <img src="docs/screenshots/backup.png" alt="Backup & restore" width="420"><br>Backup & restore | <img src="docs/screenshots/ports.png" alt="Ports" width="420"><br>Ports |
 | <img src="docs/screenshots/themes.png" alt="Themes" width="420"><br>Themes | <img src="docs/screenshots/ssh.png" alt="SSH connection" width="420"><br>SSH connection |
+| <img src="docs/screenshots/tools.png" alt="Tools" width="420"><br>Tools |   |
 
 ## Features
 
@@ -67,12 +70,13 @@ All addresses, playlist links and logins in these pictures are dummy values.
   - CoreELEC settings, Wi-Fi networks and Bluetooth pairings.
 - **Ports.** Every port the box listens on, the program that owns it, and warnings for clashes with Kodi's and this app's ports.
 - **Add-ons.** Every running add-on with its threads, CPU and memory, an on/off switch for each, and a dedicated switch for script.skin.info.service.
-- **Tools menu.**
+- **Tools tab** (under OSD themes; the shortcuts work from any page).
   - Edit titles (Ctrl+E): press Load library to list every movie and TV show Kodi has scanned, then change the title, original title, sort title or year. It goes straight into Kodi's library (no .nfo, no rescan, the artwork stays) and the TV shows it right away. The first title is kept, so Put back restores it; all renames are also listed under Add-ons → Changes.
   - Korean, Japanese or Chinese titles showing as squares: the skin's default font has no such letters. The Edit titles window has a switch that moves the skin to its own Arial fontset (Kodi's arial.ttf has them). Nothing is installed, and switching it off puts the old font back.
   - Make local NFO files: next to the media on the box (Kodi's library export), or into a folder on this PC.
   - Screenshot tool (Ctrl+Shift+S) and Copy TV screenshot (Ctrl+Shift+C).
   - Type text into Kodi (Ctrl+T).
+  - Check for updates (also in the Help menu): compares this .exe with the one on the GitHub release by its sha256 checksum, shows what changed, then downloads it, checks it and swaps it in on restart. It also looks once, quietly, a few seconds after start-up.
 - **84 app themes.**
 - **Default / Undo everywhere.** Every tab has a Default button: Skin tweaks, OSD themes, zoom values, seek preview, Live view, Keymaps, Keymap Editor settings, Media artwork, IPTV settings, Themes and the stats helper.
   - Add-ons → **Changes Kodi Control made on the box** lists everything the app installed or changed. Each item has an on/off switch where it can be switched (the helper, the stats helper, FFmpeg Tools, the seek preview, the frame cache, each skin's patched files), or a Remove / Put back button.
