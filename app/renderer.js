@@ -341,7 +341,7 @@ document.addEventListener('keydown', e => {
 // ---------- menu bar tools ----------
 const pop = (id, on) => { $(id).hidden = !on; if (on) setTimeout(() => ($(id).querySelector('button.p') || $(id).querySelector('button')).focus(), 30); };
 $$('[data-close]').forEach(b => b.onclick = () => pop(b.dataset.close, false));
-document.addEventListener('keydown', e => { if (e.key === 'Escape') ['nfoPop', 'shotPop', 'kePop'].forEach(id => { if (!$(id).hidden) pop(id, false); }); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') ['tiPop', 'nfoPop', 'shotPop', 'kePop'].forEach(id => { if (!$(id).hidden) pop(id, false); }); });
 async function copyImage(src, btn) {
   if (!src) return toast('No screenshot yet.', true);
   try { await call('clip:image', src); toast('Screenshot copied. Paste it anywhere.'); } catch (e) { toast(e.message, true); }
@@ -366,9 +366,83 @@ $('nfoGo').onclick = e => needConn() && act(e.currentTarget, async () => {
   const r = await call('nfo:export', { target: nfoTo(), movies: $('nfoMovies').checked, shows: $('nfoShows').checked, episodes: $('nfoEps').checked, images: $('nfoImg').checked, overwrite: $('nfoOver').checked, dir: $('nfoDir').value.trim() });
   $('nfoNote').textContent = r.text; toast(r.text);
 });
+// ---------- Tools → Edit titles: change a title in Kodi's library, no .nfo; every change can be put back ----------
+const TI = { items: [], sel: null, posters: {} };
+const tiKey = x => x.kind + ':' + x.id;
+const tiKindName = k => k === 'movie' ? 'Movie' : 'TV show';
+async function tiFont() {
+  if (!S.connected) { $('tiFontNote').textContent = 'Not connected.'; return; }
+  try {
+    const f = await call('font:status');
+    $('tiFontSw').classList.toggle('on', f.on); $('tiFontSw').setAttribute('aria-checked', f.on);
+    $('tiFontSw').style.display = f.cjkSet ? '' : 'none';
+    $('tiFontNote').textContent = !f.cjkSet ? `${f.skinName} has no font with those letters.`
+      : f.on ? `${f.skinName} is using its "${f.cjkSet}" font, which has them${f.orig != null ? ` (was "${f.orig}")` : ''}.`
+      : `${f.skinName}'s "${f.font}" font has no such letters; its "${f.cjkSet}" font (Kodi's Arial) has them.`;
+  } catch (e) { $('tiFontNote').textContent = e.message; }
+}
+$('tiFontSw').onclick = () => needConn() && act(null, async () => {
+  const on = !$('tiFontSw').classList.contains('on');
+  if (on && !confirm('Switch the skin to its Arial font? Korean, Japanese and Chinese letters then show everywhere, but the whole skin uses that font. Kodi reloads the skin; switch it off to put the old font back.')) return;
+  toast(await call('font:cjk', on)); setTimeout(tiFont, 1500);
+});
+function tiRender() {
+  const f = $('tiFind').value.trim().toLowerCase(), v = $('tiShow').value;
+  const list = TI.items.filter(x => (!v || x.kind === v || (v === 'changed' && x.was) || (v === 'cjk' && x.cjk)) && (!f || (x.title + ' ' + x.originaltitle + ' ' + x.year).toLowerCase().includes(f)));
+  const changed = TI.items.filter(x => x.was).length;
+  $('tiUndoAll').hidden = !changed;
+  $('tiCount').textContent = TI.items.length ? `${list.length} of ${TI.items.length} · ${TI.items.filter(x => x.kind === 'movie').length} movies, ${TI.items.filter(x => x.kind === 'tvshow').length} TV shows · ${changed} changed here` : '';
+  $('tiList').innerHTML = list.length ? list.slice(0, 600).map(x => `<div class="ti-row${TI.sel && tiKey(TI.sel) === tiKey(x) ? ' sel' : ''}" tabindex="0" role="button" data-ti="${esc(tiKey(x))}"><span class="tag">${x.kind === 'movie' ? 'movie' : 'show'}</span><span class="t">${esc(x.title)}${x.originaltitle && x.originaltitle !== x.title ? ` <span class="note">${esc(x.originaltitle)}</span>` : ''}</span><span class="note">${x.year || ''}</span>${x.was ? '<span class="tag warn">changed</span>' : ''}</div>`).join('') + (list.length > 600 ? `<div class="empty">${list.length - 600} more: search to narrow it down</div>` : '')
+    : `<div class="empty">${TI.items.length ? 'Nothing matches.' : 'No movies or TV shows in the library.'}</div>`;
+  $$('[data-ti]').forEach(el => { el.onclick = () => tiPick(el.dataset.ti); el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tiPick(el.dataset.ti); } }; });
+}
+const TI_FIELD = { title: 'title', originaltitle: 'original title', sorttitle: 'sort title', year: 'year' };
+async function tiPick(k) {
+  const x = TI.items.find(i => tiKey(i) === k); if (!x) return;
+  TI.sel = x; $('tiEd').hidden = false; tiRender();
+  $('tiKind').textContent = tiKindName(x.kind) + (x.episodes ? ` · ${x.episodes} episodes` : '');
+  $('tiName').textContent = x.title; $('tiFile').textContent = x.file || '';
+  $('tiT').value = x.title; $('tiO').value = x.originaltitle; $('tiS').value = x.sorttitle; $('tiY').value = x.year || '';
+  $('tiWas').textContent = x.was ? 'Before Kodi Control: ' + Object.entries(x.was).map(([f, v]) => `${TI_FIELD[f]} "${v}"`).join(', ') : '';
+  $('tiBack').hidden = !x.was; $('tiNote').textContent = '';
+  $('tiPoster').src = TI.posters[k] || ''; $('tiPoster').style.visibility = TI.posters[k] ? '' : 'hidden';
+  if (!(k in TI.posters) && x.poster) {
+    TI.posters[k] = '';
+    call('titles:poster', x.poster).then(d => { TI.posters[k] = d; if (TI.sel === x && d) { $('tiPoster').src = d; $('tiPoster').style.visibility = ''; } }).catch(() => {});
+  }
+  $('tiT').focus(); $('tiT').select();
+}
+$('tiLoad').onclick = e => needConn() && act(e.currentTarget, async () => {
+  $('tiList').innerHTML = '<div class="empty">Loading the library…</div>';
+  TI.items = (await call('titles:list')).items; TI.sel = null; $('tiEd').hidden = true; tiRender();
+  await tiFont();
+  const n = TI.items.filter(x => x.cjk).length;
+  if (n) $('tiFontNote').textContent += ` ${n} title${n === 1 ? ' uses' : 's use'} these letters.`;
+});
+$('tiFind').oninput = tiRender; $('tiShow').onchange = tiRender;
+const tiUpdate = (x, it, was) => Object.assign(x, { title: it.title, originaltitle: it.originaltitle || '', sorttitle: it.sorttitle || '', year: it.year || 0, was });
+$('tiApply').onclick = e => needConn() && TI.sel && act(e.currentTarget, async () => {
+  const x = TI.sel;
+  if (!$('tiT').value.trim()) throw new Error('The title can\'t be empty');
+  const r = await call('titles:set', { kind: x.kind, id: x.id, fields: { title: $('tiT').value, originaltitle: $('tiO').value, sorttitle: $('tiS').value, year: $('tiY').value } });
+  const same = r.text === 'Nothing changed';
+  if (r.item && !same) tiUpdate(x, r.item, r.was);
+  toast(r.text); tiPick(tiKey(x)); $('tiNote').textContent = same ? r.text : 'Applied · showing on the TV now';
+});
+['tiT', 'tiO', 'tiS', 'tiY'].forEach(id => $(id).onkeydown = e => { if (e.key === 'Enter') $('tiApply').click(); });
+$('tiBack').onclick = e => needConn() && TI.sel && act(e.currentTarget, async () => {
+  const x = TI.sel; toast(await call('titles:undo', { kind: x.kind, id: x.id }));
+  for (const [f, v] of Object.entries(x.was || {})) x[f] = f === 'year' ? +v || 0 : v;
+  x.was = null; tiPick(tiKey(x));
+});
+$('tiUndoAll').onclick = e => needConn() && act(e.currentTarget, async () => {
+  if (!confirm('Put every title changed here back to what it was?')) return;
+  toast(await call('titles:undo')); $('tiLoad').click();
+});
 window.kc.on('menu', async id => {
   if (id.startsWith('page:')) return show(id.slice(5));
   if (id === 'nfo') return pop('nfoPop', true);
+  if (id === 'titles') { pop('tiPop', true); return tiFont(); }
   if (id === 'shot') { pop('shotPop', true); return shotTake(); }
   if (id === 'shot:copy') { if (!needConn()) return; try { const src = await call('preview:shot'); await copyImage(src); } catch (e) { toast(e.message, true); } return; }
   if (id === 'type') { kbHidden = false; return kbShow({ title: 'Type into the field that has focus on the TV' }); }
@@ -1542,6 +1616,8 @@ async function unLoad(btn) {
     if (u.keymapFile) rows.push(['Keymap file kodicontrol.xml', 'Bindings made in Keymaps', '<button class="btn" data-un="keymap:default">Delete</button>']);
     if (u.addonToggles.length) rows.push(['Add-on switches', u.addonToggles.map(t => `${esc(t.id)} was ${t.was ? 'on' : 'off'}`).join(', '), '<button class="btn" data-un="addons:undo">Undo</button>']);
     if (u.artChanges) rows.push(['Library artwork', `${u.artChanges} change${u.artChanges === 1 ? '' : 's'} from Media`, '<button class="btn" data-un="art:undo">Undo</button>']);
+    if (u.titleChanges) rows.push(['Library titles', `${u.titleChanges} movie${u.titleChanges === 1 ? '' : 's'} or TV show${u.titleChanges === 1 ? '' : 's'} renamed in Tools → Edit titles`, '<button class="btn" data-un="titles:undo">Put back</button>']);
+    for (const f of u.fontChanged || []) rows.push([`Skin font: ${esc(f.skin)}`, `Switched to its Arial font for Korean, Japanese and Chinese letters · was "${esc(f.was)}"`, swHtml(true, 'data-unfont', 'Arial font for ' + f.skin)]);
     if (u.iptvOrig) rows.push(['IPTV Simple settings', 'Original saved before the first change', '<button class="btn" data-un="iptv:undo">Restore</button>']);
     $('unTable').innerHTML = rows.map(r => `<tr><td>${r[0]}</td><td class="note">${r[1]}</td><td style="text-align:right;white-space:nowrap"><span class="row" style="justify-content:flex-end;gap:8px">${r[2]}</span></td></tr>`).join('');
     const busy = (el, fn) => { if (el.dataset.busy) return; el.dataset.busy = 1; el.style.opacity = .5; act(null, fn).finally(() => { delete el.dataset.busy; el.style.opacity = ''; unLoad(); }); };
@@ -1560,6 +1636,7 @@ async function unLoad(btn) {
       unLoad(); cHelperState(); osdHelperState();
     }));
     $$('[data-unseek]').forEach(el => el.onclick = () => { show('osd'); $('skOn').scrollIntoView({ block: 'center' }); $('skOn').click(); });
+    $$('[data-unfont]').forEach(el => el.onclick = () => busy(el, async () => toast(await call('font:cjk', false))));
     $$('[data-unram]').forEach(el => el.onclick = () => busy(el, async () => { toast(await call('seek:ram', el.classList.contains('on'))); }));
     $$('[data-unskin]').forEach(el => el.onclick = () => {
       const on = !el.classList.contains('on');

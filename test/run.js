@@ -431,6 +431,30 @@ const AEON = {
     eq(xbt.lzo1x(src, 9).toString(), 'abcabcabc');
   });
 
+  await test('titles: rename keeps the first title, put back restores it, font switch is reversible', async () => {
+    const lib = { 7: { movieid: 7, title: 'Parasite', originaltitle: '기생충', sorttitle: '', year: 2019 } };
+    let font = 'Default';
+    const rpc = async (m, p) => {
+      if (m === 'VideoLibrary.GetMovieDetails') return { moviedetails: { ...lib[p.movieid] } };
+      if (m === 'VideoLibrary.SetMovieDetails') { const { movieid, ...f } = p; Object.assign(lib[movieid], f); return 'OK'; }
+      if (m === 'Settings.GetSettingValue') return { value: font };
+      if (m === 'Settings.SetSettingValue') { font = p.value; return true; }
+      throw new Error('unexpected ' + m);
+    };
+    const c = {};
+    const xml = '<fonts><fontset id="Default"><font><name>a</name><filename>Open.ttf</filename></font></fontset><fontset id="Arial" unicode="true"><font><name>a</name><filename>arial.ttf</filename></font></fontset></fonts>';
+    const t = require('../app/titles').make({ rpc, sh: async () => xml, q: s => s, cfg: () => c, saveCfg: () => {}, listSkins: async () => ({ current: 'skin.x' }), skinInfo: async () => ({ name: 'X', path: '/s', res: [{ folder: 'xml', def: true }] }), artData: async () => '', builtin: async () => {} });
+    await t['titles:set']({ kind: 'movie', id: 7, fields: { title: 'Gisaengchung' } });
+    await t['titles:set']({ kind: 'movie', id: 7, fields: { title: 'Parasite (2019)' } });
+    eq(c.titleUndo['movie:7'].title, 'Parasite');
+    await t['titles:undo']({ kind: 'movie', id: 7 });
+    eq(lib[7].title, 'Parasite'); eq(Object.keys(c.titleUndo).length, 0);
+    ok(require('../app/titles').CJK.test(lib[7].originaltitle), 'Hangul is detected');
+    eq((await t['font:status']()).cjkSet, 'Arial');
+    await t['font:cjk'](true); eq(font, 'Arial');
+    await t['font:cjk'](false); eq(font, 'Default'); eq(Object.keys(c.fontOrig).length, 0);
+  });
+
   console.log(results.join('\n'));
   console.log(`\n${pass} passed, ${fail} failed`);
   fs.rmSync(ROOT, { recursive: true, force: true });

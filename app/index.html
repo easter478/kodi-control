@@ -88,6 +88,7 @@ th{color:var(--muted);font-weight:500;font-size:12px;text-transform:uppercase}
 .tv{aspect-ratio:16/9;border-radius:var(--radius);background:linear-gradient(160deg,#20304a,#0b0f18);position:relative;overflow:hidden;border:1px solid var(--border)}
 .kbpop{position:fixed;inset:0;display:flex;align-items:flex-start;justify-content:center;padding-top:14vh;background:#0008;z-index:50}
 .kbpop[hidden]{display:none}
+.ti-wrap{display:flex;gap:14px;min-height:0;flex:1}.ti-list{flex:1;overflow-y:auto;max-height:58vh;border:1px solid var(--border);border-radius:10px}.ti-list .empty{padding:14px}.ti-row{display:flex;gap:8px;align-items:center;padding:7px 10px;cursor:pointer;border-bottom:1px solid var(--border)}.ti-row:hover,.ti-row:focus-visible{background:var(--surface2)}.ti-row.sel{background:color-mix(in srgb,var(--primary) 22%,transparent)}.ti-row .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ti-ed{width:360px;display:flex;flex-direction:column;gap:7px;overflow-y:auto;max-height:58vh;padding-right:4px}.ti-ed[hidden],#tiPop .btn[hidden]{display:none}.ti-f{display:flex;flex-direction:column;gap:4px;font-size:13px}.ti-poster{width:64px;height:96px;object-fit:cover;border-radius:8px;background:var(--surface2)}.ti-name{font-weight:600;font-size:16px;overflow-wrap:anywhere}.ti-font{padding:8px 12px;border:1px solid var(--border);border-radius:10px}
 .kbpop .card{width:min(520px,92vw)}
 .othumb{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px;font:500 12px "Fira Sans";color:#fff}
 .othumb .ob{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px;border-radius:8px;min-width:30px}
@@ -632,6 +633,29 @@ table.t{width:100%;border-collapse:collapse}table.t td,table.t th{padding:6px;bo
 
 </main></div>
 <div class="toast" id="toast"></div>
+<div class="kbpop" id="tiPop" role="dialog" aria-modal="true" aria-labelledby="tiTitle" hidden style="padding-top:4vh">
+  <div class="card" style="width:min(1040px,96vw);max-height:90vh;display:flex;flex-direction:column;gap:10px">
+    <div class="row between"><h3 id="tiTitle" style="margin:0">Edit titles</h3><button class="btn" data-close="tiPop" aria-label="Close">✕</button></div>
+    <p class="note" style="margin:0">Change a movie's or TV show's title straight in Kodi's library: no .nfo, no rescan, the artwork and everything else stay, and the TV shows it right away. The first title is kept here, so every change can be put back. A manual "Refresh information" in Kodi would fetch the scraper's title again.</p>
+    <div class="row ti-font" style="gap:12px;flex-wrap:nowrap"><div style="flex:1;min-width:0"><b>Korean, Japanese or Chinese titles show as squares?</b><div class="note" id="tiFontNote">Load to check the skin's font.</div></div>
+      <span class="row" style="gap:8px;flex-shrink:0;white-space:nowrap"><span class="note">Use the skin's Arial font</span><div class="sw" id="tiFontSw" role="switch" aria-checked="false" aria-label="Use the skin's Arial font for Korean, Japanese and Chinese letters"></div></span></div>
+    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn p" id="tiLoad">Load library</button>
+      <input id="tiFind" placeholder="Search titles" style="flex:1;min-width:160px" aria-label="Search titles">
+      <select id="tiShow" aria-label="Show"><option value="">Movies and TV shows</option><option value="movie">Movies</option><option value="tvshow">TV shows</option><option value="changed">Changed here</option><option value="cjk">Korean / Japanese / Chinese</option></select>
+      <button class="btn" id="tiUndoAll" hidden>Put back all</button></div>
+    <div class="ti-wrap"><div class="ti-list" id="tiList"><div class="empty">Press Load library to list every movie and TV show Kodi has scanned.</div></div>
+      <div class="ti-ed" id="tiEd" hidden>
+        <div class="row" style="gap:12px;align-items:flex-start"><img id="tiPoster" alt="" class="ti-poster"><div style="flex:1;min-width:0"><div class="note" id="tiKind"></div><div class="ti-name" id="tiName"></div><div class="note mono" id="tiFile"></div></div></div>
+        <label class="ti-f">Title<input id="tiT"></label>
+        <label class="ti-f">Original title<input id="tiO"></label>
+        <div class="row" style="gap:8px;align-items:flex-end"><label class="ti-f" style="flex:1;min-width:0">Sort title<input id="tiS" placeholder="Empty = by title"></label>
+        <label class="ti-f" style="width:96px">Year<input id="tiY" type="number" min="0" max="2100"></label></div>
+        <div class="note" id="tiWas"></div>
+        <div class="row" style="gap:8px"><button class="btn p" id="tiApply">Apply</button><button class="btn" id="tiBack" hidden>Put back</button><span class="note" id="tiNote"></span></div>
+      </div></div>
+    <div class="note" id="tiCount"></div>
+  </div>
+</div>
 <div class="kbpop" id="nfoPop" role="dialog" aria-modal="true" aria-labelledby="nfoTitle" hidden>
   <div class="card"><div class="row between"><h3 id="nfoTitle">Make local NFO files</h3><button class="btn" data-close="nfoPop" aria-label="Close">✕</button></div>
     <p class="note" style="margin:0 0 10px">Kodi-format .nfo files from your library, so the details and artwork survive a rebuild or a move to another box.</p>

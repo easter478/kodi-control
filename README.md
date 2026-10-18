@@ -2,6 +2,20 @@
 
 A Windows desktop app for managing a Kodi box (CoreELEC, LibreELEC, OSMC or any Linux Kodi) over SSH: a live dashboard, skin tweaks, OSD transplants between skins, keymaps, logs, IPTV playlists and full backups.
 
+## Screenshots
+
+All addresses, playlist links and logins in these pictures are dummy values.
+
+|   |   |
+|---|---|
+| <img src="docs/screenshots/dashboard.png" alt="Dashboard" width="420"><br>Dashboard | <img src="docs/screenshots/skin-tweaks.png" alt="Skin tweaks" width="420"><br>Skin tweaks |
+| <img src="docs/screenshots/osd-themes.png" alt="OSD themes" width="420"><br>OSD themes | <img src="docs/screenshots/live-view.png" alt="Live view" width="420"><br>Live view |
+| <img src="docs/screenshots/keymaps.png" alt="Keymaps" width="420"><br>Keymaps | <img src="docs/screenshots/media-iptv.png" alt="Media & IPTV" width="420"><br>Media & IPTV |
+| <img src="docs/screenshots/add-ons.png" alt="Add-ons and the changes list" width="420"><br>Add-ons and the changes list | <img src="docs/screenshots/performance.png" alt="Performance" width="420"><br>Performance |
+| <img src="docs/screenshots/performance-running.png" alt="Performance: running now" width="420"><br>Performance: running now | <img src="docs/screenshots/edit-titles.png" alt="Tools: Edit titles" width="420"><br>Tools: Edit titles |
+| <img src="docs/screenshots/backup.png" alt="Backup & restore" width="420"><br>Backup & restore | <img src="docs/screenshots/ports.png" alt="Ports" width="420"><br>Ports |
+| <img src="docs/screenshots/themes.png" alt="Themes" width="420"><br>Themes | <img src="docs/screenshots/ssh.png" alt="SSH connection" width="420"><br>SSH connection |
+
 ## Features
 
 - **Dashboard.** Shows:
@@ -54,6 +68,8 @@ A Windows desktop app for managing a Kodi box (CoreELEC, LibreELEC, OSMC or any 
 - **Ports.** Every port the box listens on, the program that owns it, and warnings for clashes with Kodi's and this app's ports.
 - **Add-ons.** Every running add-on with its threads, CPU and memory, an on/off switch for each, and a dedicated switch for script.skin.info.service.
 - **Tools menu.**
+  - Edit titles (Ctrl+E): press Load library to list every movie and TV show Kodi has scanned, then change the title, original title, sort title or year. It goes straight into Kodi's library (no .nfo, no rescan, the artwork stays) and the TV shows it right away. The first title is kept, so Put back restores it; all renames are also listed under Add-ons → Changes.
+  - Korean, Japanese or Chinese titles showing as squares: the skin's default font has no such letters. The Edit titles window has a switch that moves the skin to its own Arial fontset (Kodi's arial.ttf has them). Nothing is installed, and switching it off puts the old font back.
   - Make local NFO files: next to the media on the box (Kodi's library export), or into a folder on this PC.
   - Screenshot tool (Ctrl+Shift+S) and Copy TV screenshot (Ctrl+Shift+C).
   - Type text into Kodi (Ctrl+T).
