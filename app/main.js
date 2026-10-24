@@ -762,7 +762,7 @@ async function undoStatus() {
     seek: { delay, steps, orig, changed: delay != null && (delay !== orig.delay || JSON.stringify(steps) !== JSON.stringify(orig.steps)) },
     keymapFile: files.includes('km'), iptvOrig: files.some(l => l.startsWith('iptv ')), seekCacheKb: +((files.find(l => l.startsWith('cache ')) || '').slice(6)) || 0,
     addonToggles: Object.entries(cfg.addonOrig || {}).map(([id, was]) => ({ id, was })), artChanges: (cfg.artUndo || []).length,
-    titleChanges: Object.keys(cfg.titleUndo || {}).length, fontChanged: Object.entries(cfg.fontOrig || {}).map(([skin, was]) => ({ skin, was })),
+    titleChanges: Object.keys(cfg.titleUndo || {}).length, displayChanged: Object.keys(cfg.displayOrig || {}), fontChanged: Object.entries(cfg.fontOrig || {}).map(([skin, was]) => ({ skin, was })),
   };
 }
 const addonCopy = id => path.join(app.getPath('userData'), 'addon-copies', id + '.tar');
@@ -1913,6 +1913,7 @@ const needSsh = fn => async a => { if (!ssh) throw new Error('Not connected'); r
 const extra = features.make({ exec, sh, stream, q, rpc, builtin, cfg: () => cfg, saveCfg, kh: () => KH, has: () => HAS, dialog, win: () => win, app, send });
 for (const [ch, fn] of Object.entries(require('./perf').make({ exec, sh, q, rpc, kh: () => KH, cfg: () => cfg, saveCfg, app }))) handlers[ch] = needSsh(fn);
 for (const [ch, fn] of Object.entries(require('./update').make({ app, send: p => send('progress', p) }))) handlers[ch] = fn;
+for (const [ch, fn] of Object.entries(require('./display').make({ rpc, sh, q, cfg: () => cfg, saveCfg }))) handlers[ch] = needSsh(fn);
 for (const [ch, fn] of Object.entries(require('./titles').make({ rpc, sh, q, cfg: () => cfg, saveCfg, listSkins, skinInfo, artData, builtin }))) handlers[ch] = needSsh(fn);
 for (const [ch, fn] of Object.entries(extra)) handlers[ch] = ch.startsWith('pick:') || ch === 'keymap:preview' ? fn : needSsh(fn);
 const markInstalled = id => { if (!(cfg.installed ||= []).includes(id)) { cfg.installed.push(id); saveCfg(); } };

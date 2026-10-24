@@ -480,6 +480,49 @@ const AEON = {
     await t['font:cjk'](false); eq(font, 'Default'); eq(Object.keys(c.fontOrig).length, 0);
   });
 
+  await test('display modes: switches matched to the HDMI driver, broken modes flagged, whitelist change put back', async () => {
+    const d = require('../app/display');
+    eq(d.parseMode('0192001080100.00000pstd'), { id: '0192001080100.00000pstd', w: 1920, h: 1080, hz: 100, scan: 'p' });
+    eq(d.kernelMode('2160p23.976hz').h, 2160); eq(d.kernelMode('smpte24hz').w, 4096); eq(d.kernelMode('1080p50hz').w, 1920);
+    const kodi = [
+      '2026-10-24 11:56:59.000 T:1 info <general>: VideoPlayer::OpenFile: http://user:pass@iptv.example.com/live/1.ts',
+      '2026-10-24 11:56:59.407 T:1 info <general>: [WHITELIST] Searching the whitelist for: width: 1920, height: 1080, fps: 25.000, 3D: false',
+      '2026-10-24 11:56:59.407 T:1 info <general>: Display resolution ADJUST : 1920x1080 @ 50.00 - Full Screen (31) (weight: 0.000)',
+      '2026-10-24 11:57:02.596 T:1 info <general>: [WHITELIST] Searching the whitelist for: width: 1920, height: 1080, fps: 50.000, 3D: false',
+      '2026-10-24 11:57:02.596 T:1 info <general>: Display resolution ADJUST : 1920x1080 @ 100.00 - Full Screen (26) (weight: 0.000)',
+      '2026-10-24 11:57:09.082 T:1 info <general>: CVideoPlayer::CloseFile()'].join('\n');
+    const kern = [
+      '2026-10-24T11:56:59+0530 CoreELEC kernel: [drm] [meson_hdmitx_decide_color_attr]:[1080p50hz,eotf:0,vic:31]=>attr[YUV444,10bit]',
+      '2026-10-24T11:56:59+05:30 CoreELEC kernel: [drm] am_meson_crtc_atomic_enable-[0] in: new[1080p50hz], old[1080p60hz], vmode[4-4], uboot[0]',
+      '2026-10-24T11:57:02+0530 CoreELEC kernel: [drm] [meson_hdmitx_decide_color_attr]:[1920x1080p100hz,eotf:0,vic:64]=>attr[YUV444,10bit]',
+      '2026-10-24T11:57:02+0530 CoreELEC kernel: [drm] am_meson_crtc_atomic_enable-[0] in: new[1920x1080p100hz], old[1080p50hz], vmode[4-4], uboot[0]',
+      '2026-10-24T11:57:02+0530 CoreELEC kernel: [hdmitx:] Not find VIC = 64 for hpll setting'].join('\n');
+    const sw = d.parseKodi(kodi, 'kodi.log', '+0530');
+    eq(sw.length, 2); eq(sw[0].playing, 'stream'); ok(!JSON.stringify(sw).includes('pass'), 'no stream URL or password is kept');
+    const options = ['0192001080120.00000pstd', '0192001080100.00000pstd', '0192001080060.00000pstd', '0192001080050.00000pstd', '0384002160060.00000pstd'];
+    const st = { 'videoscreen.whitelist': [], 'videoplayer.adjustrefreshrate': 2, 'videoscreen.resolution': 27 };
+    const rpc = async (m, p) => {
+      if (m === 'Settings.GetSettingValue') return { value: st[p.setting] ?? null };
+      if (m === 'Settings.SetSettingValue') { st[p.setting] = p.value; return true; }
+      if (m === 'Settings.GetSettings') return { settings: [{ id: 'videoscreen.whitelist', definition: { options: options.map(v => ({ value: v, label: v })) } }, { id: 'videoscreen.resolution', options: [{ value: 27, label: '1920x1080p ' }] }] };
+      if (m === 'XBMC.GetInfoLabels') return { 'System.ScreenWidth': '1920', 'System.ScreenHeight': '1080' };
+      throw new Error('unexpected ' + m);
+    };
+    const sh = async cmd => /journalctl/.test(cmd) ? kern : /kodi\.log'/.test(cmd) ? kodi : /kodi\.old\.log/.test(cmd) ? '' : 'tz=+0530\nmode=1080p60hz\nColourspace: YUV444\n';
+    const c = {};
+    const h = d.make({ rpc, sh, q: s => `'${s}'`, cfg: () => c, saveCfg: () => {} });
+    const r = await h['display:status']();
+    eq(r.switches.map(s => s.state), ['broken', 'ok']); // newest first
+    eq(r.broken.length, 1); eq(r.broken[0].name, '1920x1080p100hz'); ok(r.broken[0].allowed, 'an empty whitelist still allows it');
+    eq(r.allowed.length, 4, 'empty whitelist = every rate at the desktop resolution');
+    await h['display:save']({ whitelist: r.allowed.filter(id => d.parseMode(id).hz < 99) });
+    eq(st['videoscreen.whitelist'], ['0192001080060.00000pstd', '0192001080050.00000pstd']);
+    ok(!(await h['display:status']()).broken[0].allowed, 'blocked after the save');
+    eq(c.displayOrig['videoscreen.whitelist'], []);
+    await h['display:undo']();
+    eq(st['videoscreen.whitelist'], []); eq(c.displayOrig, undefined);
+  });
+
   await test('auto zoom: bar maths and ffmpeg cropdetect parsing in the helper service (python)', async () => {
     const py = ['python3', 'python'].find(p => { try { return require('child_process').spawnSync(p, ['-c', 'print(1)']).status === 0; } catch { return false; } });
     if (!py) return; // no python on this PC: nothing to run the helper with

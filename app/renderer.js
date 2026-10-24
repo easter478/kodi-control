@@ -38,6 +38,7 @@ const pages = [['dashboard', 'Dashboard', '<rect x="3" y="3" width="7" height="9
   ['media', 'Media & IPTV', '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>'],
   ['addons', 'Add-ons', '<path d="M10 3h4v4a2 2 0 104 0V7h3v5h-2a2 2 0 100 4h2v5h-5v-2a2 2 0 10-4 0v2H5v-5h2a2 2 0 100-4H5V7h5z"/>'],
   ['perf', 'Performance', '<path d="M3 13a9 9 0 0118 0"/><path d="M12 13l4-4"/><path d="M5 19h14"/>'],
+  ['display', 'Display modes', '<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4M6 12l2.5-3 2.5 3 2.5-3 2.5 3 2-2.5"/>'],
   ['logs', 'Crash logs', '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/>'],
   ['backup', 'Backup', '<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>'],
   ['themes', 'Themes', '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 000 18"/>'],
@@ -58,6 +59,7 @@ function show(id) {
   if (id === 'dashboard') { poll(); ioShow(); }
   if (id === 'backup' && S.connected && !S.listed) { S.listed = true; loadBackups(); }
   if (id === 'ports' && S.connected) $('ptScan').click();
+  if (id === 'display' && S.connected) dmLoad();
   if (id === 'addons' && S.connected) { adLoad(); unLoad(); }
   try { if (id === 'perf') pfStart(); else pfStop(); } catch {}
   if (id === 'preview') pvVidStart(); else if (PVV && PVV.on) pvVidStop();
@@ -511,6 +513,79 @@ $('azNow').onclick = e => act(e.currentTarget, async () => {
   await call('autozoom:detect'); report($('azState'), [{ text: 'Measuring the playing film again…' }]); azFollow();
 });
 $('azForget').onclick = e => act(e.currentTarget, async () => { if (!confirm('Forget every measured film? Each one is measured again the next time it plays.')) return; toast(await call('autozoom:forget')); azLoad(); });
+
+// ---------- Display modes ----------
+const DM = { r: null, sel: new Set() };
+const dmHz = hz => (Math.abs(hz - Math.round(hz)) < 0.01 ? Math.round(hz) : hz.toFixed(2)) + ' Hz';
+const dmName = m => `${m.w}x${m.h}${m.scan || 'p'} ${dmHz(m.hz)}`;
+const dmBroken = o => DM.r.broken.find(b => b.h === o.h && Math.round(b.hz) === Math.round(o.hz));
+const dmTime = at => { const d = new Date(at.replace(' ', 'T').replace(/([+-]\d\d)(\d\d)$/, '$1:$2')); return isNaN(d) ? at.slice(5, 19) : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }); };
+function dmRender() {
+  const r = DM.r, v = r.values;
+  $('dmMode').textContent = r.now.mode || '?';
+  $('dmModeN').textContent = [r.now.space, r.now.depth, r.now.vic && 'VIC ' + r.now.vic.split(' ')[0]].filter(Boolean).join(' · ') || ' ';
+  $('dmGui').textContent = r.gui ? r.gui.label.replace(/\s+$/, '') : `${r.desktop.w}x${r.desktop.h}`;
+  $('dmGuiN').textContent = r.gui && r.gui.h < 2160 && r.tvModes.some(m => /^2160p/.test(m)) ? 'The TV takes 2160p: menus are drawn at a lower resolution than the TV' : 'Kodi returns to this after a film';
+  $('dmAdj').textContent = ['Off', 'Always', 'On start / stop'][v.adjust] || '?';
+  $('dmAdjN').textContent = r.wlEmpty ? 'Whitelist empty: any refresh rate at the desktop resolution' : `Whitelist: ${v.whitelist.length} modes`;
+  const live = r.broken.filter(b => b.allowed);
+  $('dmBad').textContent = r.broken.length ? `${r.broken.length}` : 'None';
+  $('dmBadN').textContent = r.broken.length ? r.broken.map(b => `${b.name}${b.allowed ? '' : ' (blocked)'}`).join(', ') : r.kernelSince ? 'None since the box started' : 'Kernel log not available';
+  const ban = $('dmBanner');
+  if (live.length) ban.innerHTML = `<span class="tag err">problem</span><span>Kodi can still switch to ${live.map(b => esc(b.name)).join(', ')}, and the HDMI driver failed ${live.length === 1 ? 'that mode' : 'those modes'} (${esc(live[0].why.join(', '))}): the picture and menus break up while a video plays in it. Press <b>Block broken modes</b>, then Save.</span>`;
+  else if (r.broken.length) ban.innerHTML = `<span class="tag ok">ok</span><span>The driver failed ${r.broken.map(b => esc(b.name)).join(', ')} since the box started, and the whitelist keeps Kodi off ${r.broken.length === 1 ? 'it' : 'them'}.</span>`;
+  else ban.innerHTML = `<span class="tag ok">ok</span><span>Every mode switch the box made since it started worked.</span>`;
+  // switches
+  const st = { ok: ['ok', 'ok'], broken: ['err', 'broken'], unchecked: ['', 'not checked'], nomatch: ['warn', 'no HDMI record'] };
+  $('dmSw').innerHTML = r.switches.length ? '<tr><th>When</th><th>Video</th><th>Switched to</th><th>HDMI</th><th></th></tr>' + r.switches.map(s => `<tr><td class="mono">${esc(dmTime(s.at))}</td><td>${s.video ? `${s.video.w}x${s.video.h} · ${+s.video.fps.toFixed(3)} fps${s.playing ? ' · ' + esc(s.playing) : ''}` : esc(s.why)}</td><td>${s.to.w}x${s.to.h} @ ${dmHz(s.to.hz)}</td><td class="note">${s.hdmi ? esc(s.hdmi.mode + (s.hdmi.attr ? ' · ' + s.hdmi.attr : '') + (s.hdmi.bad.length ? ' · ' + s.hdmi.bad.join(', ') : '')) : ''}</td><td><span class="tag ${st[s.state][0]}">${st[s.state][1]}</span></td></tr>`).join('') : '<tr><td class="empty">No refresh-rate switches in the logs yet.</td></tr>';
+  $('dmSwN').textContent = r.switches.length ? `${r.switches.length} switch${r.switches.length === 1 ? '' : 'es'}, newest first` : '';
+  dmWl(); dmControls();
+}
+function dmWl() {
+  const r = DM.r, groups = {};
+  for (const o of r.options) (groups[`${o.w}x${o.h}${o.scan}`] ||= []).push(o);
+  $('dmWl').innerHTML = Object.entries(groups).map(([g, list]) => `<fieldset><legend>${esc(g)}</legend>${list.map(o => { const b = dmBroken(o); return `<label><input type="checkbox" data-dm="${esc(o.id)}"${DM.sel.has(o.id) ? ' checked' : ''}> ${esc(dmHz(o.hz))}${b ? ' <span class="tag err" title="' + esc(b.why.join(', ')) + '">broken</span>' : o.hz >= 100 ? ' <span class="tag warn" title="High refresh: only for films that need it">high</span>' : ''}</label>`; }).join('')}</fieldset>`).join('');
+  $$('[data-dm]').forEach(c => c.onchange = () => { c.checked ? DM.sel.add(c.dataset.dm) : DM.sel.delete(c.dataset.dm); dmNote(); });
+  dmNote();
+}
+function dmNote() {
+  const r = DM.r;
+  $('dmWlNote').textContent = DM.sel.size ? `${DM.sel.size} modes ticked: Kodi switches only to these, and stays in the desktop mode when none fits.` : `Nothing ticked = Kodi's default: any refresh rate at the desktop resolution (${r.gui ? r.gui.w + 'x' + r.gui.h : '?'}), 100 and 120 Hz included.`;
+}
+function dmControls() {
+  const v = DM.r.values;
+  $('dmAdjSel').value = String(v.adjust ?? 2);
+  const d = $('dmDelay'); if (![...d.options].some(o => o.value === String(v.delay))) d.add(new Option(`${(v.delay / 10).toFixed(1)} s`, String(v.delay))); d.value = String(v.delay ?? 0);
+  $('dmDouble').checked = !!v.double; $('dmPull').checked = !!v.pulldown; $('dmWhole').checked = !!v.whole;
+  const o = DM.r.orig;
+  $('dmUndo').hidden = !o;
+  $('dmOrig').textContent = o ? `Changed here: ${Object.keys(o).map(k => k.split('.').pop()).join(', ')} · Put back restores what Kodi had before` : '';
+}
+async function dmLoad(btn) {
+  const go = async () => {
+    DM.r = await call('display:status');
+    DM.sel = new Set(DM.r.wlEmpty ? [] : DM.r.values.whitelist);
+    dmRender();
+  };
+  try { btn ? await act(btn, go) : await go(); } catch (e) { $('dmBanner').innerHTML = `<span class="tag err">error</span><span>${esc(e.message)}</span>`; }
+}
+$('dmLoad').onclick = e => needConn() && dmLoad(e.currentTarget);
+// "block" starts from what Kodi may use now: the whitelist, or every rate at the desktop resolution when it is empty
+const dmStart = () => DM.sel.size ? [...DM.sel] : DM.r.allowed.slice();
+$('dmBlockBad').onclick = () => { if (!DM.r) return; if (!DM.r.broken.length) return toast('No mode has failed since the box started'); DM.sel = new Set(dmStart().filter(id => !dmBroken(DM.r.options.find(o => o.id === id)))); dmWl(); toast('Broken modes unticked. Press Save.'); };
+$('dmBlockHi').onclick = () => { if (!DM.r) return; DM.sel = new Set(dmStart().filter(id => DM.r.options.find(o => o.id === id).hz < 99)); dmWl(); toast('100 and 120 Hz unticked. Press Save.'); };
+$('dmEmpty').onclick = () => { if (!DM.r) return; DM.sel = new Set(); dmWl(); toast('Whitelist cleared (Kodi default). Press Save.'); };
+$('dmSave').onclick = e => act(e.currentTarget, async () => {
+  if (!DM.r) return;
+  const v = DM.r.values, want = { whitelist: [...DM.sel], adjust: +$('dmAdjSel').value, delay: +$('dmDelay').value, double: $('dmDouble').checked, pulldown: $('dmPull').checked, whole: $('dmWhole').checked };
+  const changes = {};
+  for (const [k, x] of Object.entries(want)) if (JSON.stringify(k === 'whitelist' ? [...x].sort() : x) !== JSON.stringify(k === 'whitelist' ? [...(v.whitelist || [])].sort() : v[k])) changes[k] = x;
+  if (!Object.keys(changes).length) return toast('Nothing changed');
+  if (changes.whitelist && changes.whitelist.length && !changes.whitelist.some(id => { const o = DM.r.options.find(x => x.id === id); return o && DM.r.gui && o.h === DM.r.gui.h; })) { if (!confirm('No mode at the desktop resolution is ticked, so every video will switch resolution as well as refresh rate. Save anyway?')) return; }
+  toast(await call('display:save', changes));
+  await dmLoad();
+});
+$('dmUndo').onclick = e => act(e.currentTarget, async () => { if (!confirm('Put Kodi\'s display settings back as they were before Kodi Control changed them?')) return; toast(await call('display:undo')); await dmLoad(); });
 
 // ---------- Help → Check for updates ----------
 const UP = { r: null, file: '' };
@@ -1719,6 +1794,7 @@ async function unLoad(btn) {
     if (u.addonToggles.length) rows.push(['Add-on switches', u.addonToggles.map(t => `${esc(t.id)} was ${t.was ? 'on' : 'off'}`).join(', '), '<button class="btn" data-un="addons:undo">Undo</button>']);
     if (u.artChanges) rows.push(['Library artwork', `${u.artChanges} change${u.artChanges === 1 ? '' : 's'} from Media`, '<button class="btn" data-un="art:undo">Undo</button>']);
     if (u.titleChanges) rows.push(['Library titles', `${u.titleChanges} movie${u.titleChanges === 1 ? '' : 's'} or TV show${u.titleChanges === 1 ? '' : 's'} renamed in Tools → Edit titles`, '<button class="btn" data-un="titles:undo">Put back</button>']);
+    if ((u.displayChanged || []).length) rows.push(['Kodi display settings', `Changed on Display modes: ${u.displayChanged.map(s => esc(s.split('.').pop())).join(', ')}`, '<button class="btn" data-un="display:undo">Put back</button>']);
     for (const f of u.fontChanged || []) rows.push([`Skin font: ${esc(f.skin)}`, `Switched to its Arial font for Korean, Japanese and Chinese letters · was "${esc(f.was)}"`, swHtml(true, 'data-unfont', 'Arial font for ' + f.skin)]);
     if (u.iptvOrig) rows.push(['IPTV Simple settings', 'Original saved before the first change', '<button class="btn" data-un="iptv:undo">Restore</button>']);
     $('unTable').innerHTML = rows.map(r => `<tr><td>${r[0]}</td><td class="note">${r[1]}</td><td style="text-align:right;white-space:nowrap"><span class="row" style="justify-content:flex-end;gap:8px">${r[2]}</span></td></tr>`).join('');

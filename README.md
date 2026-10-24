@@ -58,6 +58,10 @@ All addresses, playlist links and logins in these pictures are dummy values.
   - Posters from a USB drive.
   - Download M3U playlists, send them from the PC, or browse the box for them.
   - Back up playlists and set up PVR IPTV Simple.
+- **Display modes.** The HDMI mode the box sends the TV, the desktop resolution the menus use, and every refresh-rate switch Kodi made for a video (from kodi.log).
+  - Each switch is checked against the kernel log: when the box's HDMI driver can't set the pixel clock for a mode ("Not find VIC = 64 for hpll setting", seen with 1080p 100 Hz on CoreELEC nightlies), the picture and the menus break up until playback stops. Those switches and modes are flagged "broken".
+  - Edit Kodi's display whitelist with ticks per mode, or press Block broken modes or Block 100/120 Hz. Also: Adjust refresh rate, the wait after a switch, double refresh rates, 3:2 pulldown and whole-number repeat.
+  - Kodi's first values are kept, so Put back (here or under Add-ons → Changes) restores them.
 - **Performance.** Is anything wearing out the box's eMMC? Everything here only reads; clean-up buttons ask first.
   - Overview: eMMC wear (JEDEC life estimate), write rate, CPU, memory, swap, temperature and disk use, refreshed every 5 s.
   - Analyze: samples writes for a chosen time and shows which folders changed, log size and what fills it, thumbnail count and growth (unused and orphaned ones too), databases and add-on data, and what Kodi Control itself keeps on the box. It compares with the previous Analyze.
